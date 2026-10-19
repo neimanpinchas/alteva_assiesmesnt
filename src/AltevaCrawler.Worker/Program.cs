@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using MassTransit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -14,15 +13,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.Extensions.Http;
-using AltevaCrawler.Shared.Data;
 using AltevaCrawler.Shared.Storage;
+using AltevaCrawler.Shared.Utilities;
 using AltevaCrawler.Worker.Consumers;
 using AltevaCrawler.Worker.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-
-string connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Server=localhost;Port=3306;Database=alteva_crawler;Uid=root;Pwd=rootpassword;";
 
 string rabbitHost = builder.Configuration["RabbitMQ:Host"] ?? "localhost";
 string rabbitUser = builder.Configuration["RabbitMQ:Username"] ?? "guest";
@@ -30,10 +26,8 @@ string rabbitPass = builder.Configuration["RabbitMQ:Password"] ?? "guest";
 
 bool allowInvalidCerts = builder.Configuration.GetValue<bool>("Crawler:AllowInvalidCertificates");
 
-builder.Services.AddDbContextFactory<AppDbContext>(options =>
-{
-    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-});
+// The worker has no database access by design: everything it learns is published as events and the API
+// persists them. A MySQL outage therefore cannot stop crawling or crash the worker.
 
 builder.Services.AddSingleton<IStorageService, LocalStorageService>();
 
@@ -56,11 +50,21 @@ builder.Services.AddHttpClient("CrawlClient", client =>
     }
     return handler;
 })
-.AddPolicyHandler(HttpPolicyExtensions
-    .HandleTransientHttpError()
+// Transient = 5xx, 408, timeouts and network errors. Certificate/TLS failures are permanent, so they are not retried
+// and surface immediately as an "ssl" error on the page.
+.AddPolicyHandler(Policy<HttpResponseMessage>
+    .Handle<HttpRequestException>(ex => !CrawlErrorClassifier.IsTlsError(ex))
+    .Or<Polly.Timeout.TimeoutRejectedException>()
+    .OrResult(r => (int)r.StatusCode >= 500 || r.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
     .WaitAndRetryAsync(2, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
-builder.Services.AddSingleton<CrawlerEngine>();
+// The engine is a singleton (it owns the per-job cancel/pause state that the control consumers act on), so it
+// must not capture the scoped IPublishEndpoint. IBus is the singleton bus-level publisher.
+builder.Services.AddSingleton<CrawlerEngine>(sp => new CrawlerEngine(
+    sp.GetRequiredService<IHttpClientFactory>(),
+    sp.GetRequiredService<IBus>(),
+    sp.GetRequiredService<IStorageService>(),
+    sp.GetRequiredService<ILogger<CrawlerEngine>>()));
 
 builder.Services.AddMassTransit(x =>
 {
@@ -94,21 +98,6 @@ builder.Services.AddHealthChecks()
 var app = builder.Build();
 
 app.MapHealthChecks("/health");
-
-using (var scope = app.Services.CreateScope())
-{
-    var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-    using var dbContext = dbFactory.CreateDbContext();
-    try
-    {
-        dbContext.Database.EnsureCreated();
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Failed to initialize database during worker startup.");
-    }
-}
 
 app.Run("http://0.0.0.0:5001");
 

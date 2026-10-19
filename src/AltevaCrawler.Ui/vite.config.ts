@@ -14,6 +14,16 @@ export default defineConfig({
       '/hubs': {
         target: 'http://localhost:5000',
         ws: true
+      },
+      '/alteva/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/alteva\/api/, '/api')
+      },
+      '/alteva/hubs': {
+        target: 'http://localhost:5000',
+        ws: true,
+        rewrite: (path) => path.replace(/^\/alteva\/hubs/, '/hubs')
       }
     }
   }

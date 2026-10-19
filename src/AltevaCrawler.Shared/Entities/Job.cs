@@ -25,7 +25,12 @@ public class Job
 
     public int MaxPagesLimit { get; set; } = 200;
 
+    /// <summary>
+    /// Concurrency token: consumers update jobs from several messages at once, and a stale writer
+    /// (e.g. "Pending -> Running") must never overwrite a newer status such as Completed or Failed.
+    /// </summary>
     [Required]
+    [ConcurrencyCheck]
     [Column("status", TypeName = "char(1)")]
     public char StatusChar { get; set; } = (char)JobStatus.Pending;
 

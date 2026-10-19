@@ -141,22 +141,14 @@ public static class UrlNormalizer
     {
         if (outgoingLinkUrls == null) return 0.0;
 
-        string normalizedStartDomain = ExtractDomain(startDomain, stripWww);
-        int total = 0;
-        int sameDomainCount = 0;
+        Dictionary<string, int> countsByDomain = outgoingLinkUrls
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Select(url => ExtractDomain(url, stripWww))
+            .GroupBy(domain => domain, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var linkUrl in outgoingLinkUrls)
-        {
-            if (string.IsNullOrWhiteSpace(linkUrl)) continue;
-            total++;
-            string linkDomain = ExtractDomain(linkUrl, stripWww);
-            if (string.Equals(linkDomain, normalizedStartDomain, StringComparison.OrdinalIgnoreCase))
-            {
-                sameDomainCount++;
-            }
-        }
-
-        return CalculateDomainLinkRatio(sameDomainCount, total);
+        countsByDomain.TryGetValue(ExtractDomain(startDomain, stripWww), out int sameDomainCount);
+        return CalculateDomainLinkRatio(sameDomainCount, countsByDomain.Values.Sum());
     }
 
     public static double CalculateDomainLinkRatio(int outgoingInDomainCount, int totalOutgoingCount)

@@ -43,7 +43,7 @@ This document highlights all edge cases, network behaviors, concurrency race con
 
 ## 6. Infrastructure Outage Reporting
 - **Database / Queue Outage Handling**: API `GET /health` reports the MySQL state and the worker `GET /health` reports the MassTransit bus state. The API's broker field is still a static string.
-- **Worker Startup Without a Database**: a failed database initialisation is logged instead of silently swallowed.
+- **MySQL Outage vs. the Worker**: the worker has no database access at all (no `DbContext`, no `EnsureCreated`); it only talks to RabbitMQ and the file store, so a MySQL outage cannot crash or stall it. The API persists the events once the database is back (messages wait in the queue).
 
 ---
 
@@ -54,3 +54,5 @@ This document highlights all edge cases, network behaviors, concurrency race con
 - **Unexpected job error**: publishes `Failed` with a `FailureReason` (also written to `JobStatusTransitions`) so the job does not stay `Running`. An unexpected error on a single page publishes a failed-page event for that page instead of making it vanish.
 - **Failed re-crawl of a stored page**: the API keeps the previously stored SimHash, path and size when a later event for the same page is a failure.
 - **Same site crawled twice**: dedupe is per job, so both jobs fetch fully (the page rows are shared).
+- **SSL/TLS and other fetch errors are shown, not hidden**: certificate and handshake failures (untrusted root, name mismatch, expired), DNS failures, connection refusals, timeouts and HTTP errors are classified (`CrawlErrorClassifier`), saved on the page and displayed in the UI. Certificate errors are not retried (they are permanent); an `HttpClient` timeout is reported as a `timeout` instead of being mistaken for a job cancellation and dropped.
+- **Start page failure**: if the very first page cannot be fetched or stored, the job is marked `Failed` with a reason rather than `Completed` with 0 pages.

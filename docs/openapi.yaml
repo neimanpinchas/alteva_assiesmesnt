@@ -121,6 +121,27 @@ paths:
         '200':
           description: Job metrics
 
+  /jobs/{id}/errors:
+    get:
+      summary: Pages of the job whose fetch failed (SSL/TLS, DNS, timeout, HTTP error, non-HTML, storage)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Failed pages, newest first (max 500)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PageErrorDto'
+        '404':
+          description: Job not found
+
   /jobs/{id}/search:
     get:
       summary: SimHash keyword search within job pages
@@ -224,3 +245,14 @@ components:
         maxPagesLimit:
           type: integer
           default: 200
+    PageErrorDto:
+      type: object
+      properties:
+        pageId: { type: integer, format: int64 }
+        url: { type: string }
+        statusCode: { type: integer }
+        kind:
+          type: string
+          enum: [ssl, dns, timeout, connection, http, non-html, storage, error]
+        message: { type: string }
+        occurredAt: { type: string, format: date-time, nullable: true }

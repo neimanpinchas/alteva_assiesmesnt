@@ -12,7 +12,7 @@ flowchart LR
     GHA -->|1. Test .NET & React| GHA
     GHA -->|2. Verify Docker Build| GHA
     GHA -->|3. POST Ping Webhook| WEBHOOK["Webhook Listener (Port 9000)"]
-    WEBHOOK -->|4. git pull origin main| REPO["/opt/alteva_crawler"]
+    WEBHOOK -->|4. git pull origin main| REPO["/opt/stacks/alteva_crawler"]
     WEBHOOK -->|5. docker compose up -d --build| DOCKER["Docker Containers"]
     DOCKER -->|Serve| NGINX["Nginx (fast.eseqtech.com/alteva)"]
 ```
@@ -35,8 +35,8 @@ User=root
 WorkingDirectory=/opt/alteva_crawler
 Environment="PORT=9000"
 Environment="WEBHOOK_SECRET=your-secure-random-secret"
-Environment="PROJECT_DIR=/opt/alteva_crawler"
-ExecStart=/usr/bin/python3 /opt/alteva_crawler/scripts/deploy-webhook.py
+Environment="PROJECT_DIR=/opt/stacks/alteva_crawler"
+ExecStart=/usr/bin/python3 /opt/stacks/alteva_crawler/scripts/deploy-webhook.py
 Restart=always
 
 [Install]

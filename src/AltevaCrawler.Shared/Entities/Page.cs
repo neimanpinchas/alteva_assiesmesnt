@@ -50,6 +50,14 @@ public class Page
 
     public int StatusCode { get; set; }
 
+    /// <summary>Category of the last failed fetch (ssl, timeout, dns, ...); null when the last fetch succeeded.</summary>
+    [MaxLength(32)]
+    public string? ErrorKind { get; set; }
+
+    /// <summary>Readable reason for the last failed fetch, surfaced in the UI.</summary>
+    [MaxLength(512)]
+    public string? ErrorMessage { get; set; }
+
     public int OutgoingLinksCount { get; set; }
 
     public bool IsCrawled { get; set; }

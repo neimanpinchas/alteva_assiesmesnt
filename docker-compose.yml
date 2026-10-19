@@ -8,7 +8,7 @@ services:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: alteva_crawler
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -37,6 +37,7 @@ services:
     ports:
       - "5000:80"
     environment:
+      ASPNETCORE_HTTP_PORTS: "80"
       ConnectionStrings__DefaultConnection: "Server=mysql;Port=3306;Database=alteva_crawler;Uid=root;Pwd=rootpassword;"
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__Username: "guest"
@@ -55,6 +56,7 @@ services:
       dockerfile: src/AltevaCrawler.Worker/Dockerfile
     container_name: alteva-crawl-worker
     environment:
+      ASPNETCORE_HTTP_PORTS: "80"
       ConnectionStrings__DefaultConnection: "Server=mysql;Port=3306;Database=alteva_crawler;Uid=root;Pwd=rootpassword;"
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__Username: "guest"
@@ -76,6 +78,22 @@ services:
       - "3000:80"
     depends_on:
       - crawl-api
+
+  deploy-webhook:
+    build:
+      context: .
+      dockerfile: scripts/Dockerfile.webhook
+    container_name: alteva-deploy-webhook
+    ports:
+      - "127.0.0.1:9095:9000"
+    environment:
+      PORT: "9000"
+      WEBHOOK_SECRET: "alteva-secret-token-2026"
+      PROJECT_DIR: "/opt/stacks/alteva_crawler"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app
+    restart: always
 
 volumes:
   mysql_data:

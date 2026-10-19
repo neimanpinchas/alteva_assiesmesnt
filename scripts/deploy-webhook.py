@@ -39,6 +39,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"status": "ok", "service": "Alteva Crawler Deploy Webhook"})
 
 if __name__ == "__main__":
+    HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", PORT), WebhookHandler)
     print(f"Deploy webhook server running on port {PORT}...")
     try:

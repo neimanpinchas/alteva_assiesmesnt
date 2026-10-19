@@ -14,5 +14,7 @@ public class TreeNodeDto
     public int OutgoingLinksCount { get; set; }
     public double OnTheFlyDomainLinkRatio { get; set; }
     public bool IsCrawled { get; set; }
+    public string? ErrorKind { get; set; }
+    public string? ErrorMessage { get; set; }
     public List<TreeNodeDto> Children { get; set; } = new();
 }

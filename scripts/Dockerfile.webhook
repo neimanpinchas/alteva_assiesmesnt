@@ -1,0 +1,12 @@
+FROM docker:cli
+
+RUN apk add --no-cache python3 git bash docker-cli-compose
+
+WORKDIR /app
+
+COPY scripts/deploy-webhook.py /usr/local/bin/deploy-webhook.py
+RUN chmod +x /usr/local/bin/deploy-webhook.py
+
+EXPOSE 9000
+
+CMD ["python3", "/usr/local/bin/deploy-webhook.py"]

@@ -3,21 +3,30 @@ namespace AltevaCrawler.Worker.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using HtmlAgilityPack;
 using MassTransit;
 using Microsoft.Extensions.Logging;
 using AltevaCrawler.Shared.Events;
 using AltevaCrawler.Shared.Storage;
 using AltevaCrawler.Shared.Utilities;
 
+/// <summary>
+/// Orchestrates one crawl job: schedules batches of page crawls and publishes the resulting events.
+/// Fetching, HTML analysis, limit bookkeeping and the final job outcome live in
+/// <see cref="PageFetcher"/>, <see cref="PageLinkExtractor"/>, <see cref="CrawlJobState"/> and <see cref="JobOutcomes"/>.
+/// </summary>
 public class CrawlerEngine
 {
-    private readonly HttpClient _httpClient;
+    private const int BatchSize = 5;
+    private const int StorageAttempts = 2;
+    private const int FailedFetchStatus = 500;
+    private static readonly TimeSpan PausePollInterval = TimeSpan.FromSeconds(1);
+
+    private readonly PageFetcher _fetcher;
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly IStorageService _storageService;
     private readonly ILogger<CrawlerEngine> _logger;
@@ -31,7 +40,7 @@ public class CrawlerEngine
         IStorageService storageService,
         ILogger<CrawlerEngine> logger)
     {
-        _httpClient = httpClientFactory.CreateClient("CrawlClient");
+        _fetcher = new PageFetcher(httpClientFactory.CreateClient("CrawlClient"));
         _publishEndpoint = publishEndpoint;
         _storageService = storageService;
         _logger = logger;
@@ -52,294 +61,13 @@ public class CrawlerEngine
     {
         using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _jobCtsMap[jobId] = jobCts;
-        var token = jobCts.Token;
+        var state = new CrawlJobState(maxPagesLimit);
 
         _logger.LogInformation("Starting parallel crawl job {JobId} for {Url} (MaxPages: {Limit})", jobId, startUrl, maxPagesLimit);
 
-        int crawledCount = 0;
-        long totalBytes = 0;
-        var jobUrlCache = new HashSet<uint>();
-
         try
         {
-            string? normalizedStartUrl = UrlNormalizer.Normalize(startUrl);
-            if (normalizedStartUrl == null)
-            {
-                if (!token.IsCancellationRequested)
-                {
-                    await _publishEndpoint.Publish(new JobProgressUpdatedEvent
-                    {
-                        JobId = jobId,
-                        Status = "Failed",
-                        CrawledPagesCount = 0,
-                        DiscoveredPagesCount = 0,
-                        TotalBytesDownloaded = 0,
-                        FailureReason = "Invalid start URL.",
-                        UpdatedAt = DateTime.UtcNow
-                    }, CancellationToken.None);
-                }
-                return;
-            }
-
-            uint startCrc = UrlNormalizer.ComputeCrc32(normalizedStartUrl);
-
-            var queue = new ConcurrentQueue<(string Url, uint UrlCrc, int Depth, string? ParentUrl)>();
-
-            lock (jobUrlCache)
-            {
-                jobUrlCache.Add(startCrc);
-            }
-            queue.Enqueue((normalizedStartUrl, startCrc, 0, null));
-
-            using var semaphore = new SemaphoreSlim(5);
-
-            while (!queue.IsEmpty && Volatile.Read(ref crawledCount) < maxPagesLimit && !token.IsCancellationRequested)
-            {
-                while (_pausedJobs.TryGetValue(jobId, out bool isPaused) && isPaused && !token.IsCancellationRequested)
-                {
-                    await Task.Delay(1000, token);
-                }
-
-                if (token.IsCancellationRequested) break;
-
-                var tasks = new List<Task>();
-
-                while (!queue.IsEmpty && Volatile.Read(ref crawledCount) < maxPagesLimit && tasks.Count < 5 && !token.IsCancellationRequested)
-                {
-                    if (!queue.TryDequeue(out var item)) break;
-
-                    tasks.Add(Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await semaphore.WaitAsync(token);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            return;
-                        }
-
-                        bool pageReported = false;
-                        try
-                        {
-                            if (Volatile.Read(ref crawledCount) >= maxPagesLimit || token.IsCancellationRequested)
-                            {
-                                return;
-                            }
-
-                            var (currentUrl, currentCrc, currentDepth, parentUrl) = item;
-
-                            HttpResponseMessage response;
-                            try
-                            {
-                                response = await _httpClient.GetAsync(currentUrl, token);
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                return;
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning("HTTP error for {Url}: {Message}", currentUrl, ex.Message);
-                                if (!token.IsCancellationRequested)
-                                {
-                                    await _publishEndpoint.Publish(new PageCrawledEvent
-                                    {
-                                        JobId = jobId,
-                                        Url = currentUrl,
-                                        UrlCrc32 = currentCrc,
-                                        StatusCode = 500,
-                                        ByteSize = 0,
-                                        OutgoingLinksCount = 0,
-                                        CrawledAt = DateTime.UtcNow
-                                    }, CancellationToken.None);
-                                }
-                                return;
-                            }
-
-                            if (token.IsCancellationRequested) return;
-
-                            if (!response.IsSuccessStatusCode)
-                            {
-                                _logger.LogInformation("Fetch failed for {Url} ({StatusCode})", currentUrl, response.StatusCode);
-                                if (!token.IsCancellationRequested)
-                                {
-                                    await _publishEndpoint.Publish(new PageCrawledEvent
-                                    {
-                                        JobId = jobId,
-                                        Url = currentUrl,
-                                        UrlCrc32 = currentCrc,
-                                        StatusCode = (int)response.StatusCode,
-                                        ByteSize = 0,
-                                        OutgoingLinksCount = 0,
-                                        CrawledAt = DateTime.UtcNow
-                                    }, CancellationToken.None);
-                                }
-                                return;
-                            }
-
-                            string contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
-                            if (!contentType.Contains("html", StringComparison.OrdinalIgnoreCase))
-                            {
-                                _logger.LogInformation("Skipping non-HTML page {Url} ({ContentType})", currentUrl, contentType);
-                                if (!token.IsCancellationRequested)
-                                {
-                                    await _publishEndpoint.Publish(new PageCrawledEvent
-                                    {
-                                        JobId = jobId,
-                                        Url = currentUrl,
-                                        UrlCrc32 = currentCrc,
-                                        StatusCode = (int)response.StatusCode,
-                                        ByteSize = 0,
-                                        OutgoingLinksCount = 0,
-                                        CrawledAt = DateTime.UtcNow
-                                    }, CancellationToken.None);
-                                }
-                                return;
-                            }
-
-                            string html = await response.Content.ReadAsStringAsync(token);
-                            byte[] htmlBytes = Encoding.UTF8.GetBytes(html);
-                            long byteSize = htmlBytes.Length;
-
-                            // Atomic increment with strict limit check BEFORE saving, counting, or queueing
-                            if (Volatile.Read(ref crawledCount) >= maxPagesLimit || token.IsCancellationRequested)
-                            {
-                                return;
-                            }
-
-                            int currentCount = Interlocked.Increment(ref crawledCount);
-                            if (currentCount > maxPagesLimit)
-                            {
-                                Interlocked.Decrement(ref crawledCount);
-                                return;
-                            }
-
-                            Interlocked.Add(ref totalBytes, byteSize);
-
-                            string domain = UrlNormalizer.ExtractDomain(currentUrl);
-                            string? relativeStoragePath = await TrySavePageAsync(domain, currentUrl, htmlBytes);
-                            if (relativeStoragePath == null)
-                            {
-                                // Page cannot be previewed or verified later: release its slot and report it as failed.
-                                Interlocked.Decrement(ref crawledCount);
-                                Interlocked.Add(ref totalBytes, -byteSize);
-                                pageReported = true;
-                                if (!token.IsCancellationRequested)
-                                {
-                                    await PublishPageFailureAsync(jobId, currentUrl, currentCrc, 500);
-                                }
-                                return;
-                            }
-
-                            var doc = new HtmlDocument();
-                            doc.LoadHtml(html);
-                            string textContent = doc.DocumentNode.InnerText;
-                            ulong simHash = SimHashCalculator.Compute64(textContent);
-
-                            var hrefNodes = doc.DocumentNode.SelectNodes("//a[@href]");
-                            var outgoingLinks = new List<(string Url, uint UrlCrc)>();
-
-                            if (hrefNodes != null)
-                            {
-                                foreach (var node in hrefNodes)
-                                {
-                                    string rawHref = node.GetAttributeValue("href", string.Empty);
-                                    string? normalizedHref = UrlNormalizer.Normalize(rawHref, currentUrl);
-                                    if (normalizedHref != null)
-                                    {
-                                        uint linkCrc = UrlNormalizer.ComputeCrc32(normalizedHref);
-                                        outgoingLinks.Add((normalizedHref, linkCrc));
-                                    }
-                                }
-                            }
-
-                            if (!token.IsCancellationRequested)
-                            {
-                                await _publishEndpoint.Publish(new PageCrawledEvent
-                                {
-                                    JobId = jobId,
-                                    Url = currentUrl,
-                                    UrlCrc32 = currentCrc,
-                                    StatusCode = (int)response.StatusCode,
-                                    ByteSize = byteSize,
-                                    SimHash = simHash,
-                                    StoragePath = relativeStoragePath,
-                                    OutgoingLinksCount = outgoingLinks.Count,
-                                    CrawledAt = DateTime.UtcNow
-                                }, CancellationToken.None);
-                                pageReported = true;
-                            }
-
-                            if (currentDepth < maxDepth && !token.IsCancellationRequested)
-                            {
-                                foreach (var (linkUrl, linkCrc) in outgoingLinks)
-                                {
-                                    if (token.IsCancellationRequested) break;
-
-                                    await _publishEndpoint.Publish(new LinkDiscoveredEvent
-                                    {
-                                        JobId = jobId,
-                                        SourceUrl = currentUrl,
-                                        TargetUrl = linkUrl,
-                                        TargetUrlCrc32 = linkCrc,
-                                        Depth = currentDepth + 1,
-                                        DiscoveredAt = DateTime.UtcNow
-                                    }, CancellationToken.None);
-
-                                    bool isNewLink;
-                                    lock (jobUrlCache)
-                                    {
-                                        isNewLink = jobUrlCache.Add(linkCrc);
-                                    }
-
-                                    if (isNewLink && Volatile.Read(ref crawledCount) < maxPagesLimit)
-                                    {
-                                        queue.Enqueue((linkUrl, linkCrc, currentDepth + 1, currentUrl));
-                                    }
-                                }
-                            }
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            // Expected on job cancellation
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Error processing page {Url} in job {JobId}", item.Url, jobId);
-                            if (!pageReported && !token.IsCancellationRequested)
-                            {
-                                await PublishPageFailureAsync(jobId, item.Url, item.UrlCrc, 500);
-                            }
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }, token));
-                }
-
-                await Task.WhenAll(tasks);
-            }
-
-            if (!token.IsCancellationRequested)
-            {
-                await _publishEndpoint.Publish(new JobProgressUpdatedEvent
-                {
-                    JobId = jobId,
-                    Status = "Completed",
-                    CrawledPagesCount = crawledCount,
-                    DiscoveredPagesCount = jobUrlCache.Count,
-                    TotalBytesDownloaded = totalBytes,
-                    UpdatedAt = DateTime.UtcNow
-                }, CancellationToken.None);
-
-                _logger.LogInformation("Crawl loop finished for job {JobId}. Crawled: {Count}/{Limit}", jobId, crawledCount, maxPagesLimit);
-            }
-            else
-            {
-                _logger.LogInformation("Crawl job {JobId} canceled.", jobId);
-            }
+            await RunJobAsync(new CrawlContext(jobId, maxDepth, maxPagesLimit, state, jobCts.Token), startUrl);
         }
         catch (OperationCanceledException)
         {
@@ -348,7 +76,7 @@ public class CrawlerEngine
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing job {JobId}", jobId);
-            await PublishJobFailedAsync(jobId, ex, crawledCount, jobUrlCache.Count, totalBytes);
+            await PublishJobFailedAsync(jobId, JobOutcomes.Crashed(jobId, ex, state));
         }
         finally
         {
@@ -357,10 +85,170 @@ public class CrawlerEngine
         }
     }
 
+    private async Task RunJobAsync(CrawlContext ctx, string startUrl)
+    {
+        string? normalizedStartUrl = UrlNormalizer.Normalize(startUrl);
+        if (normalizedStartUrl == null)
+        {
+            await PublishTerminalAsync(ctx, JobOutcomes.InvalidStartUrl(ctx.JobId));
+            return;
+        }
+
+        uint startCrc = UrlNormalizer.ComputeCrc32(normalizedStartUrl);
+        ctx.State.TryMarkDiscovered(startCrc);
+        ctx.Queue.Enqueue(new CrawlWorkItem(normalizedStartUrl, startCrc, 0));
+
+        await RunCrawlLoopAsync(ctx);
+
+        if (ctx.Token.IsCancellationRequested)
+        {
+            _logger.LogInformation("Crawl job {JobId} canceled.", ctx.JobId);
+            return;
+        }
+
+        await PublishTerminalAsync(ctx, JobOutcomes.Final(ctx.JobId, ctx.State));
+        _logger.LogInformation("Crawl loop finished for job {JobId}. Crawled: {Count}/{Limit}", ctx.JobId, ctx.State.CrawledCount, ctx.MaxPagesLimit);
+    }
+
+    private async Task RunCrawlLoopAsync(CrawlContext ctx)
+    {
+        while (ctx.CanContinue && !ctx.Queue.IsEmpty)
+        {
+            await WaitWhilePausedAsync(ctx);
+            if (ctx.Token.IsCancellationRequested) break;
+
+            var batch = DequeueBatch(ctx);
+            await Task.WhenAll(batch.Select(item => Task.Run(() => ProcessPageAsync(ctx, item), ctx.Token)));
+        }
+    }
+
+    private async Task WaitWhilePausedAsync(CrawlContext ctx)
+    {
+        while (_pausedJobs.TryGetValue(ctx.JobId, out bool isPaused) && isPaused && !ctx.Token.IsCancellationRequested)
+        {
+            await Task.Delay(PausePollInterval, ctx.Token);
+        }
+    }
+
+    private static List<CrawlWorkItem> DequeueBatch(CrawlContext ctx)
+    {
+        var batch = new List<CrawlWorkItem>(BatchSize);
+        while (batch.Count < BatchSize && ctx.CanContinue && ctx.Queue.TryDequeue(out var item))
+        {
+            batch.Add(item);
+        }
+        return batch;
+    }
+
+    /// <summary>Crawls one page; any unexpected error is reported on the page instead of failing the whole job.</summary>
+    private async Task ProcessPageAsync(CrawlContext ctx, CrawlWorkItem item)
+    {
+        var attempt = new PageAttempt();
+        try
+        {
+            await CrawlPageAsync(ctx, item, attempt);
+        }
+        catch (OperationCanceledException) when (ctx.Token.IsCancellationRequested)
+        {
+            // Expected on job cancellation
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing page {Url} in job {JobId}", item.Url, ctx.JobId);
+            if (!attempt.Reported)
+            {
+                await ReportFailureAsync(ctx, item, FailedFetchStatus, CrawlErrorClassifier.FromException(ex));
+            }
+        }
+    }
+
+    private async Task CrawlPageAsync(CrawlContext ctx, CrawlWorkItem item, PageAttempt attempt)
+    {
+        if (!ctx.CanContinue) return;
+
+        FetchResult fetch = await _fetcher.FetchAsync(item.Url, ctx.Token);
+        if (fetch.Outcome == FetchOutcome.Canceled || ctx.Token.IsCancellationRequested) return;
+
+        if (fetch.Error is { } fetchError)
+        {
+            await ReportFailureAsync(ctx, item, fetch.StatusCode, fetchError);
+            return;
+        }
+
+        await StoreAndPublishAsync(ctx, item, fetch, attempt);
+    }
+
+    private async Task StoreAndPublishAsync(CrawlContext ctx, CrawlWorkItem item, FetchResult fetch, PageAttempt attempt)
+    {
+        byte[] htmlBytes = Encoding.UTF8.GetBytes(fetch.Html);
+
+        // The slot is claimed BEFORE saving, counting or queueing so the page limit is strict.
+        if (ctx.Token.IsCancellationRequested || !ctx.State.TryReserveSlot(htmlBytes.Length)) return;
+
+        string? storagePath = await TrySavePageAsync(UrlNormalizer.ExtractDomain(item.Url), item.Url, htmlBytes);
+        if (storagePath == null)
+        {
+            // Page cannot be previewed or verified later: release its slot and report it as failed.
+            ctx.State.ReleaseSlot(htmlBytes.Length);
+            attempt.Reported = true;
+            await ReportFailureAsync(ctx, item, FailedFetchStatus, CrawlErrorClassifier.FromStorageFailure());
+            return;
+        }
+
+        ExtractedPage extracted = PageLinkExtractor.Extract(fetch.Html, item.Url);
+        if (ctx.Token.IsCancellationRequested) return;
+
+        await PublishPageCrawledAsync(ctx, item, fetch.StatusCode, htmlBytes.Length, storagePath, extracted);
+        attempt.Reported = true;
+
+        await DiscoverLinksAsync(ctx, item, extracted.Links);
+    }
+
+    private Task PublishPageCrawledAsync(
+        CrawlContext ctx, CrawlWorkItem item, int statusCode, long byteSize, string storagePath, ExtractedPage extracted) =>
+        _publishEndpoint.Publish(new PageCrawledEvent
+        {
+            JobId = ctx.JobId,
+            Url = item.Url,
+            UrlCrc32 = item.UrlCrc,
+            StatusCode = statusCode,
+            ByteSize = byteSize,
+            SimHash = extracted.SimHash,
+            StoragePath = storagePath,
+            OutgoingLinksCount = extracted.Links.Count,
+            CrawledAt = DateTime.UtcNow
+        }, CancellationToken.None);
+
+    /// <summary>Publishes every link of a page within the depth limit and queues the ones not seen before.</summary>
+    private async Task DiscoverLinksAsync(CrawlContext ctx, CrawlWorkItem item, IReadOnlyList<CrawlLink> links)
+    {
+        if (item.Depth >= ctx.MaxDepth) return;
+
+        foreach (var link in links)
+        {
+            if (ctx.Token.IsCancellationRequested) break;
+
+            await _publishEndpoint.Publish(new LinkDiscoveredEvent
+            {
+                JobId = ctx.JobId,
+                SourceUrl = item.Url,
+                TargetUrl = link.Url,
+                TargetUrlCrc32 = link.UrlCrc,
+                Depth = item.Depth + 1,
+                DiscoveredAt = DateTime.UtcNow
+            }, CancellationToken.None);
+
+            if (ctx.State.TryMarkDiscovered(link.UrlCrc) && ctx.State.HasCapacity)
+            {
+                ctx.Queue.Enqueue(new CrawlWorkItem(link.Url, link.UrlCrc, item.Depth + 1));
+            }
+        }
+    }
+
     private async Task<string?> TrySavePageAsync(string domain, string url, byte[] content)
     {
         // One retry covers transient IO errors (file locks, brief network-share hiccups).
-        for (int attempt = 1; attempt <= 2; attempt++)
+        for (int attempt = 1; attempt <= StorageAttempts; attempt++)
         {
             try
             {
@@ -368,42 +256,77 @@ public class CrawlerEngine
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save page content for {Url} (attempt {Attempt}/2)", url, attempt);
+                _logger.LogError(ex, "Failed to save page content for {Url} (attempt {Attempt}/{Max})", url, attempt, StorageAttempts);
             }
         }
         return null;
     }
 
-    private Task PublishPageFailureAsync(string jobId, string url, uint urlCrc, int statusCode) =>
-        _publishEndpoint.Publish(new PageCrawledEvent
+    /// <summary>Records a failed page; a failed start page is also remembered so the job can be failed with its reason.</summary>
+    private async Task ReportFailureAsync(CrawlContext ctx, CrawlWorkItem item, int statusCode, CrawlError error)
+    {
+        _logger.LogWarning("Fetch failed for {Url} [{Kind}]: {Message}", item.Url, error.Kind, error.Message);
+        if (item.Depth == 0) ctx.State.RecordStartPageError(error.Message);
+        if (ctx.Token.IsCancellationRequested) return;
+
+        await _publishEndpoint.Publish(new PageCrawledEvent
         {
-            JobId = jobId,
-            Url = url,
-            UrlCrc32 = urlCrc,
+            JobId = ctx.JobId,
+            Url = item.Url,
+            UrlCrc32 = item.UrlCrc,
             StatusCode = statusCode,
             ByteSize = 0,
             OutgoingLinksCount = 0,
-            CrawledAt = DateTime.UtcNow
+            CrawledAt = DateTime.UtcNow,
+            ErrorKind = error.Kind,
+            ErrorMessage = error.Message
         }, CancellationToken.None);
+    }
 
-    private async Task PublishJobFailedAsync(string jobId, Exception ex, int crawled, int discovered, long bytes)
+    private async Task PublishTerminalAsync(CrawlContext ctx, JobProgressUpdatedEvent progress)
+    {
+        if (ctx.Token.IsCancellationRequested) return;
+        await _publishEndpoint.Publish(progress, CancellationToken.None);
+    }
+
+    private async Task PublishJobFailedAsync(string jobId, JobProgressUpdatedEvent failed)
     {
         try
         {
-            await _publishEndpoint.Publish(new JobProgressUpdatedEvent
-            {
-                JobId = jobId,
-                Status = "Failed",
-                CrawledPagesCount = crawled,
-                DiscoveredPagesCount = discovered,
-                TotalBytesDownloaded = bytes,
-                FailureReason = $"{ex.GetType().Name}: {ex.Message}",
-                UpdatedAt = DateTime.UtcNow
-            }, CancellationToken.None);
+            await _publishEndpoint.Publish(failed, CancellationToken.None);
         }
         catch (Exception publishEx)
         {
             _logger.LogError(publishEx, "Could not publish Failed status for job {JobId}", jobId);
         }
+    }
+
+    private readonly record struct CrawlWorkItem(string Url, uint UrlCrc, int Depth);
+
+    /// <summary>Tracks whether a page already produced its PageCrawledEvent, so a late error is not reported twice.</summary>
+    private sealed class PageAttempt
+    {
+        public bool Reported { get; set; }
+    }
+
+    private sealed class CrawlContext
+    {
+        public CrawlContext(string jobId, int maxDepth, int maxPagesLimit, CrawlJobState state, CancellationToken token)
+        {
+            JobId = jobId;
+            MaxDepth = maxDepth;
+            MaxPagesLimit = maxPagesLimit;
+            State = state;
+            Token = token;
+        }
+
+        public string JobId { get; }
+        public int MaxDepth { get; }
+        public int MaxPagesLimit { get; }
+        public CrawlJobState State { get; }
+        public CancellationToken Token { get; }
+        public ConcurrentQueue<CrawlWorkItem> Queue { get; } = new();
+
+        public bool CanContinue => State.HasCapacity && !Token.IsCancellationRequested;
     }
 }

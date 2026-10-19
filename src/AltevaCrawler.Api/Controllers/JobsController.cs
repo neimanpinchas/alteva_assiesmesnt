@@ -242,7 +242,9 @@ public class JobsController : ControllerBase
             SimHash = page.SimHash,
             OutgoingLinksCount = page.OutgoingLinksCount,
             OnTheFlyDomainLinkRatio = Math.Round(onTheFlyDomainLinkRatio, 4),
-            IsCrawled = page.IsCrawled
+            IsCrawled = page.IsCrawled,
+            ErrorKind = page.ErrorKind,
+            ErrorMessage = page.ErrorMessage
         };
 
         if (remainingDepth > 1 && childLinks.Count > 0)
@@ -344,6 +346,33 @@ public class JobsController : ControllerBase
         };
 
         return Ok(metrics);
+    }
+
+    /// <summary>Pages of this job whose fetch failed (SSL/TLS, DNS, timeout, HTTP error, non-HTML, storage), newest first.</summary>
+    [HttpGet("{id}/errors")]
+    public async Task<IActionResult> GetJobErrors(string id)
+    {
+        var job = await _dbContext.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id);
+        if (job == null) return NotFound();
+
+        var errors = await _dbContext.Pages.AsNoTracking()
+            .Where(p => p.ErrorKind != null &&
+                        (p.NormalizedUrl == job.Url ||
+                         _dbContext.JobPageLinks.Any(l => l.JobId == id && l.TargetPageId == p.Id)))
+            .OrderByDescending(p => p.CrawledAt)
+            .Take(500)
+            .Select(p => new PageErrorDto
+            {
+                PageId = p.Id,
+                Url = p.Url,
+                StatusCode = p.StatusCode,
+                Kind = p.ErrorKind!,
+                Message = p.ErrorMessage ?? string.Empty,
+                OccurredAt = p.CrawledAt
+            })
+            .ToListAsync();
+
+        return Ok(errors);
     }
 
     [HttpGet("global-search")]

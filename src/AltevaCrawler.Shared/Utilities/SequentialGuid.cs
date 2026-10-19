@@ -3,9 +3,18 @@ namespace AltevaCrawler.Shared.Utilities;
 using System;
 
 /// <summary>
-/// Provides time-ordered sequential GUID generation (UUIDv7 layout)
+/// Provides time-ordered sequential GUID generation (UUIDv7 layout, RFC 9562)
 /// to prevent B-tree index fragmentation in relational databases.
 /// </summary>
+/// <remarks>
+/// Why not UUIDv1: v1 stores the low 32 bits of its timestamp first, so its text and byte order
+/// wrap every ~7 minutes and new rows would land at random places in the index, which is the
+/// fragmentation this class exists to avoid. v1 also needs a node id and clock sequence, and
+/// .NET has no built-in v1 generator, so it would be hand-rolled anyway.
+/// Why hand-rolled v7: the project targets net8.0 and <c>Guid.CreateVersion7()</c> ships in .NET 9.
+/// Once the target framework is raised to net9.0 or later, replace this body with that call.
+/// The 12-bit counter in rand_a is RFC 9562 "method 1" for ordering ids within one millisecond.
+/// </remarks>
 public static class SequentialGuid
 {
     private static readonly object Lock = new();

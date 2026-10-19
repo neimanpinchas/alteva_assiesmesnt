@@ -119,6 +119,9 @@ Page HTML content is decoupled from relational database records and managed via 
 | `JobProgressUpdatedEvent` | Worker/API → API/UI | `JobId`, `Status` (`Completed`/`Failed`/`Paused`/`Canceled`), counts, `TotalBytesDownloaded`, `FailureReason` |
 | `Cancel/Pause/ResumeJobRequestedEvent` | API → Worker | `JobId` |
 
+### Crawl errors are visible in the UI
+Every failed fetch is stored on the page (`Pages.ErrorKind`, `Pages.ErrorMessage`) and shown in the job's **Crawl Errors** panel, as a coloured badge on the link-tree node, and live over SignalR while the crawl runs. Kinds: `ssl` (certificate/TLS handshake, e.g. untrusted root or name mismatch), `dns`, `timeout`, `connection`, `http` (4xx/5xx with the status text), `non-html` and `storage`. If the **start page** itself fails, the job ends as `Failed` with a readable reason (for example "Start page failed: SSL/TLS error: ... UntrustedRoot") instead of a silent empty "Completed". SSL/TLS errors are never retried; to crawl a site with an invalid certificate set `Crawler:AllowInvalidCertificates` to `true` (default `false`). `GET /api/jobs/{id}/errors` lists them.
+
 ### What counts as a crawled page
 Only a stored 2xx HTML page counts toward `TotalPagesCrawled`, `TotalBytesDownloaded` and the page limit. These are recorded on the page row but **not** counted: 4xx/5xx responses (4xx is never retried), network errors and timeouts, non-HTML content types, and pages whose file could not be written (the write is retried once first).
 
@@ -180,7 +183,7 @@ docker-compose up --build
 ```bash
 dotnet test
 ```
-All **53 tests** pass cleanly (the real-MySQL check runs only when `ALTEVA_TEST_MYSQL` is set, e.g. `Server=127.0.0.1;Port=3306;Uid=root;Pwd=...;`; it creates and drops a scratch database), covering:
+All **57 tests** pass cleanly (the real-MySQL check runs only when `ALTEVA_TEST_MYSQL` is set, e.g. `Server=127.0.0.1;Port=3306;Uid=root;Pwd=...;`; it creates and drops a scratch database), covering:
 - `Pages.UrlCrc32` is a stored generated column: model metadata, C# vs MySQL CRC32 test vectors, legacy-column upgrade and value parity on real MySQL
 - URL normalization & lenient scheme prepending (`www.` stripping, allow-listing, query strings)
 - Domain extraction & domain hash calculation
@@ -188,6 +191,7 @@ All **53 tests** pass cleanly (the real-MySQL check runs only when `ALTEVA_TEST_
 - 64-bit SimHash calculation & Haxe 64-bit vs C# `SimHashCalculator` parity
 - `IStorageService` file operations, query-string-safe storage paths & path safety
 - Crawler engine (fake HTTP handler and publisher): cancellation, non-HTML/error pages not counted, strict max-pages limit, storage-failure handling, unexpected-error `Failed` status
+- Error classification (SSL/TLS, DNS, timeout, connection, HTTP, non-HTML) and engine behaviour for an SSL failure on the start page and for timeouts
 - `PageCrawledEvent.IsSuccess` classification and `SequentialGuid` uniqueness under concurrency
 - Haxe C# vs native C# parity
 - Stateless HMAC session token creation & verification

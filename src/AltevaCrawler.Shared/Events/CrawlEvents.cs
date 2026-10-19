@@ -35,6 +35,12 @@ public record PageCrawledEvent
     public int OutgoingLinksCount { get; init; }
     public DateTime CrawledAt { get; init; } = DateTime.UtcNow;
 
+    /// <summary>Short category of a failed fetch (ssl, timeout, dns, connection, http, non-html, storage, error); null on success.</summary>
+    public string? ErrorKind { get; init; }
+
+    /// <summary>Human-readable reason shown in the UI; null on success.</summary>
+    public string? ErrorMessage { get; init; }
+
     /// <summary>
     /// True only for a fetched, stored HTML page (2xx with content). Dead links, fetch errors,
     /// non-HTML responses and storage failures are reported with the same event but are not "crawled pages".

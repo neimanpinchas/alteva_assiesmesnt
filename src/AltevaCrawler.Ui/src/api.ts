@@ -1,6 +1,6 @@
 // @ts-ignore
 import './haxeGenerated/shared.js';
-import { JobSummary, TreeNodeDto, JobMetricsDto, PageSearchResultDto, PageContentDto } from './types';
+import { JobSummary, TreeNodeDto, JobMetricsDto, PageSearchResultDto, PageContentDto, PageErrorDto } from './types';
 
 const API_BASE = 'api';
 let authToken: string | null = null;
@@ -103,5 +103,11 @@ export async function cancelJob(jobId: string) {
 export async function deleteJob(jobId: string) {
   const res = await fetchWithAuth(`${API_BASE}/jobs/${jobId}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete job');
+  return res.json();
+}
+
+export async function getJobErrors(jobId: string): Promise<PageErrorDto[]> {
+  const res = await fetchWithAuth(`${API_BASE}/jobs/${jobId}/errors`);
+  if (!res.ok) throw new Error('Failed to fetch crawl errors');
   return res.json();
 }

@@ -42,6 +42,13 @@ public static class SchemaUpgrader
                 logger?.LogWarning("Adding missing column Pages.ByteSize.");
                 await ExecuteAsync(connection, "ALTER TABLE `Pages` ADD COLUMN `ByteSize` BIGINT NOT NULL DEFAULT 0", ct);
             }
+
+            if (await TableExistsAsync(connection, "Pages", ct) && !await ColumnExistsAsync(connection, "Pages", "ErrorKind", ct))
+            {
+                logger?.LogWarning("Adding missing columns Pages.ErrorKind and Pages.ErrorMessage.");
+                await ExecuteAsync(connection,
+                    "ALTER TABLE `Pages` ADD COLUMN `ErrorKind` VARCHAR(32) NULL, ADD COLUMN `ErrorMessage` VARCHAR(512) NULL", ct);
+            }
         }
         finally
         {

@@ -61,7 +61,7 @@ public class UrlCrc32GeneratedColumnTests
             await db.Database.EnsureCreatedAsync();
 
             // Emulate a database created by an older build: plain UrlCrc32 column, no ByteSize.
-            await db.Database.ExecuteSqlRawAsync("ALTER TABLE `Pages` DROP COLUMN `UrlCrc32`, DROP COLUMN `ByteSize`");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE `Pages` DROP COLUMN `UrlCrc32`, DROP COLUMN `ByteSize`, DROP COLUMN `ErrorKind`, DROP COLUMN `ErrorMessage`");
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE `Pages` ADD COLUMN `UrlCrc32` INT UNSIGNED NOT NULL DEFAULT 0");
 
             await SchemaUpgrader.ApplyAsync(db);
@@ -78,6 +78,19 @@ public class UrlCrc32GeneratedColumnTests
             {
                 db.Pages.Add(new Page { Url = url, NormalizedUrl = url, Domain = UrlNormalizer.ExtractDomain(url), DomainHash = 1 });
             }
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            // Error columns were re-added by the upgrader and round-trip through EF.
+            var failed = new Page { Url = "https://bad.example/", NormalizedUrl = "https://bad.example/", Domain = "bad.example", DomainHash = 2,
+                                    StatusCode = 500, ErrorKind = "ssl", ErrorMessage = "SSL/TLS error: UntrustedRoot" };
+            db.Pages.Add(failed);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+            var reloaded = await db.Pages.AsNoTracking().SingleAsync(p => p.Id == failed.Id);
+            Assert.Equal("ssl", reloaded.ErrorKind);
+            Assert.Equal("SSL/TLS error: UntrustedRoot", reloaded.ErrorMessage);
+            db.Pages.Remove(await db.Pages.SingleAsync(p => p.Id == failed.Id));
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
 

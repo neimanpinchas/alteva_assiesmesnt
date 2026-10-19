@@ -7,12 +7,15 @@ import {
 } from 'recharts';
 import {
   getJob, getJobTree, getJobMetrics, searchJobPages, getPageContent,
-  pauseJob, resumeJob, cancelJob, deleteJob
+  pauseJob, resumeJob, cancelJob, deleteJob, getJobErrors
 } from '../api';
-import { JobSummary, TreeNodeDto, JobMetricsDto, PageSearchResultDto, getJobStatusBadgeClass } from '../types';
+import {
+  JobSummary, TreeNodeDto, JobMetricsDto, PageSearchResultDto, PageErrorDto,
+  getJobStatusBadgeClass, getErrorKindBadgeClass, getErrorKindLabel, isSuccessfulPageEvent
+} from '../types';
 import {
   Activity, Globe, Search, Layers, Ban, FileText,
-  Pause, Play, Trash2, Zap
+  Pause, Play, Trash2, Zap, AlertTriangle
 } from 'lucide-react';
 
 interface JobDetailsProps {
@@ -30,11 +33,13 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
   const [selectedPageContent, setSelectedPageContent] = useState<string | null>(null);
   const [selectedPageUrl, setSelectedPageUrl] = useState<string | null>(null);
   const [liveHistory, setLiveHistory] = useState<any[]>([]);
+  const [errors, setErrors] = useState<PageErrorDto[]>([]);
 
   useEffect(() => {
     loadJobDetails();
     loadTree();
     loadMetrics();
+    loadErrors();
 
     const connection = new signalR.HubConnectionBuilder()
       .withUrl('hubs/crawlProgress')
@@ -46,6 +51,20 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
     }).catch(console.error);
 
     connection.on('PageCrawled', (data) => {
+      const succeeded = isSuccessfulPageEvent(data.statusCode, data.byteSize);
+
+      // Failed fetches (SSL/TLS, DNS, timeout, HTTP error...) are listed immediately and do not count as crawled pages.
+      if (!succeeded && data.errorKind) {
+        setErrors(prev => [{
+          url: data.url,
+          statusCode: data.statusCode,
+          kind: data.errorKind,
+          message: data.errorMessage || '',
+          occurredAt: data.crawledAt
+        }, ...prev.filter(e => e.url !== data.url)].slice(0, 500));
+      }
+      if (!succeeded) return;
+
       setJob(prev => prev ? {
         ...prev,
         totalPagesCrawled: prev.totalPagesCrawled + 1,
@@ -73,10 +92,12 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
         ...prev,
         status: data.status,
         totalPagesCrawled: data.crawledPagesCount,
-        totalBytesDownloaded: data.totalBytesDownloaded
+        totalBytesDownloaded: data.totalBytesDownloaded,
+        failureReason: data.failureReason ?? prev.failureReason
       } : prev);
       loadTree();
       loadMetrics();
+      loadErrors();
     });
 
     return () => {
@@ -91,6 +112,14 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
       if (data.progressHistory && data.progressHistory.length > 0) {
         setLiveHistory(data.progressHistory);
       }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadErrors = async () => {
+    try {
+      setErrors(await getJobErrors(jobId));
     } catch (err) {
       console.error(err);
     }
@@ -126,6 +155,12 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
           <span className="px-2 py-0.5 text-xs bg-indigo-900/60 text-indigo-300 rounded font-mono" title={`SimHash Fingerprint: ${n.simHashHex}`}>
             Signature
           </span>
+          {n.errorKind && (
+            <span className={`px-2 py-0.5 text-xs rounded flex items-center space-x-1 ${getErrorKindBadgeClass(n.errorKind)}`} title={n.errorMessage}>
+              <AlertTriangle className="w-3 h-3" />
+              <span>{getErrorKindLabel(n.errorKind)}</span>
+            </span>
+          )}
         </div>
       ),
       rawNode: n,
@@ -341,6 +376,36 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
       {/* TAB 1: CRAWL EVOLUTION & METRICS */}
       {activeTab === 'status' && (
         <div className="space-y-6">
+          {job.status === 'Failed' && job.failureReason && (
+            <div role="alert" className={`p-4 rounded-xl flex items-start space-x-3 ${getErrorKindBadgeClass('ssl')}`}>
+              <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">Crawl failed</p>
+                <p className="text-sm break-words">{job.failureReason}</p>
+              </div>
+            </div>
+          )}
+
+          {errors.length > 0 && (
+            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-xl space-y-3">
+              <div className="flex items-center space-x-2">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+                <h3 className="text-lg font-semibold text-white">Crawl Errors ({errors.length})</h3>
+              </div>
+              <ul className="divide-y divide-slate-700 max-h-64 overflow-auto text-sm">
+                {errors.map(e => (
+                  <li key={e.url} className="py-2 flex items-start space-x-3">
+                    <span className={`px-2 py-0.5 text-xs rounded shrink-0 ${getErrorKindBadgeClass(e.kind)}`}>{getErrorKindLabel(e.kind)}</span>
+                    <div className="min-w-0">
+                      <p className="font-mono text-cyan-300 truncate" title={e.url}>{e.url}</p>
+                      <p className="text-xs text-slate-400 break-words">{e.message}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-xl space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">

@@ -50,6 +50,8 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
                 ContentHash = msg.ContentHash,
                 StoragePath = msg.StoragePath,
                 StatusCode = msg.StatusCode,
+                ErrorKind = msg.IsSuccess ? null : msg.ErrorKind,
+                ErrorMessage = msg.IsSuccess ? null : msg.ErrorMessage,
                 ByteSize = msg.ByteSize,
                 OutgoingLinksCount = msg.OutgoingLinksCount,
                 IsCrawled = true,
@@ -79,12 +81,48 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
             }
 
             page.StatusCode = msg.StatusCode;
+            page.ErrorKind = msg.IsSuccess ? null : msg.ErrorKind;
+            page.ErrorMessage = msg.IsSuccess ? null : msg.ErrorMessage;
             page.OutgoingLinksCount = msg.OutgoingLinksCount;
             page.IsCrawled = true;
             page.CrawledAt = msg.CrawledAt;
         }
 
-        // Dead links, fetch errors and non-HTML responses are recorded on the page but are not crawled pages.
+        try
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // Safely ignore foreign key race conditions
+        }
+
+        await UpdateJobAfterPageAsync(dbJob, msg);
+
+        await _hubContext.Clients.Group($"job-{msg.JobId}")
+            .SendAsync("PageCrawled", msg);
+    }
+
+    /// <summary>
+    /// Counts the page and moves Pending to Running. Saved separately from the page so a conflict never drops the page.
+    /// </summary>
+    private async Task UpdateJobAfterPageAsync(Job dbJob, PageCrawledEvent msg)
+    {
+        try
+        {
+            await _dbContext.Entry(dbJob).ReloadAsync();
+        }
+        catch (Exception)
+        {
+            // If job was deleted concurrently
+            return;
+        }
+
+        if (dbJob.Status == JobStatus.Completed || dbJob.Status == JobStatus.Failed || dbJob.Status == JobStatus.Canceled)
+        {
+            return;
+        }
+
         if (msg.IsSuccess)
         {
             dbJob.TotalPagesCrawled++;
@@ -102,11 +140,9 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
         }
         catch (DbUpdateException)
         {
-            // Safely ignore foreign key race conditions
+            // The job moved on concurrently (usually already Completed/Failed, whose final event carries the
+            // authoritative totals). Dropping this stale update is correct; overwriting the newer status is not.
         }
-
-        await _hubContext.Clients.Group($"job-{msg.JobId}")
-            .SendAsync("PageCrawled", msg);
     }
 }
 
@@ -194,47 +230,79 @@ public class ApiJobProgressConsumer : IConsumer<JobProgressUpdatedEvent>
         _hubContext = hubContext;
     }
 
+    private const int MaxSaveAttempts = 3;
+
     public async Task Consume(ConsumeContext<JobProgressUpdatedEvent> context)
     {
         var msg = context.Message;
-        var job = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == msg.JobId);
-        if (job != null)
-        {
-            if (msg.Status == "Completed")
-            {
-                job.Status = JobStatus.Completed;
-                job.CompletedAt = DateTime.UtcNow;
-            }
-            else if (msg.Status == "Failed")
-            {
-                char previousStatus = job.StatusChar;
-                job.Status = JobStatus.Failed;
-                job.CompletedAt = DateTime.UtcNow;
-                string reason = string.IsNullOrWhiteSpace(msg.FailureReason) ? "Crawl failed." : msg.FailureReason;
-                job.FailureReason = reason.Length > 512 ? reason[..512] : reason;
-                _dbContext.JobStatusTransitions.Add(new JobStatusTransition
-                {
-                    JobId = job.Id,
-                    FromStatus = previousStatus,
-                    ToStatus = JobStatus.Failed.ToChar(),
-                    TransitionedAt = DateTime.UtcNow,
-                    Reason = job.FailureReason.Length > 255 ? job.FailureReason[..255] : job.FailureReason
-                });
-            }
-            else if (msg.Status == "Paused")
-            {
-                job.Status = JobStatus.Paused;
-            }
-            job.TotalPagesCrawled = msg.CrawledPagesCount;
-            job.TotalBytesDownloaded = msg.TotalBytesDownloaded;
-            try
-            {
-                await _dbContext.SaveChangesAsync();
-            }
-            catch (DbUpdateException) { }
-        }
+        await ApplyWithRetryAsync(msg);
 
         await _hubContext.Clients.Group($"job-{msg.JobId}")
             .SendAsync("JobProgressUpdated", msg);
+    }
+
+    /// <summary>
+    /// Applies the event to a freshly loaded job. If another consumer changed the status in between (for example the
+    /// first page flipping Pending to Running) the attempt is repeated on the new state, so a terminal status always wins.
+    /// </summary>
+    private async Task ApplyWithRetryAsync(JobProgressUpdatedEvent msg)
+    {
+        for (int attempt = 1; attempt <= MaxSaveAttempts; attempt++)
+        {
+            _dbContext.ChangeTracker.Clear();
+            var job = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == msg.JobId);
+            if (job == null) return;
+
+            ApplyProgress(job, msg);
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+                return;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Retry on the latest status.
+            }
+            catch (DbUpdateException)
+            {
+                return;
+            }
+        }
+    }
+
+    private void ApplyProgress(Job job, JobProgressUpdatedEvent msg)
+    {
+        if (msg.Status == "Completed")
+        {
+            job.Status = JobStatus.Completed;
+            job.CompletedAt = DateTime.UtcNow;
+        }
+        else if (msg.Status == "Failed")
+        {
+            MarkFailed(job, msg);
+        }
+        else if (msg.Status == "Paused")
+        {
+            job.Status = JobStatus.Paused;
+        }
+        job.TotalPagesCrawled = msg.CrawledPagesCount;
+        job.TotalBytesDownloaded = msg.TotalBytesDownloaded;
+    }
+
+    private void MarkFailed(Job job, JobProgressUpdatedEvent msg)
+    {
+        char previousStatus = job.StatusChar;
+        job.Status = JobStatus.Failed;
+        job.CompletedAt = DateTime.UtcNow;
+        string reason = string.IsNullOrWhiteSpace(msg.FailureReason) ? "Crawl failed." : msg.FailureReason;
+        job.FailureReason = reason.Length > 512 ? reason[..512] : reason;
+        _dbContext.JobStatusTransitions.Add(new JobStatusTransition
+        {
+            JobId = job.Id,
+            FromStatus = previousStatus,
+            ToStatus = JobStatus.Failed.ToChar(),
+            TransitionedAt = DateTime.UtcNow,
+            Reason = job.FailureReason.Length > 255 ? job.FailureReason[..255] : job.FailureReason
+        });
     }
 }

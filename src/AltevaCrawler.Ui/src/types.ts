@@ -43,7 +43,18 @@ export interface TreeNodeDto {
   outgoingLinksCount: number;
   onTheFlyDomainLinkRatio: number;
   isCrawled: boolean;
+  errorKind?: string;
+  errorMessage?: string;
   children: TreeNodeDto[];
+}
+
+export interface PageErrorDto {
+  pageId?: number;
+  url: string;
+  statusCode: number;
+  kind: string;
+  message: string;
+  occurredAt?: string;
 }
 
 export interface JobMetricsDto {
@@ -96,4 +107,37 @@ export function getJobStatusBadgeClass(status: string): string {
     default:
       return 'bg-slate-700 text-slate-300';
   }
+}
+
+export function getErrorKindLabel(kind: string): string {
+  switch (kind) {
+    case 'ssl': return 'SSL / TLS';
+    case 'dns': return 'DNS';
+    case 'timeout': return 'Timeout';
+    case 'connection': return 'Connection';
+    case 'http': return 'HTTP error';
+    case 'non-html': return 'Not HTML';
+    case 'storage': return 'Storage';
+    default: return 'Error';
+  }
+}
+
+export function getErrorKindBadgeClass(kind: string): string {
+  switch (kind) {
+    case 'ssl':
+      return 'bg-red-900/60 text-red-300 border border-red-700';
+    case 'dns':
+    case 'connection':
+    case 'timeout':
+      return 'bg-orange-900/60 text-orange-300 border border-orange-700';
+    case 'non-html':
+      return 'bg-slate-700 text-slate-300 border border-slate-600';
+    default:
+      return 'bg-amber-900/60 text-amber-300 border border-amber-700';
+  }
+}
+
+/** A fetched, stored HTML page. Mirrors the server's PageCrawledEvent.IsSuccess. */
+export function isSuccessfulPageEvent(statusCode: number, byteSize: number): boolean {
+  return statusCode >= 200 && statusCode < 300 && byteSize > 0;
 }

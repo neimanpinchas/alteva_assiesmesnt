@@ -75,3 +75,6 @@ The database schema (`Jobs`, `Pages`, `JobPageLinks`, `JobStatusTransitions`) wa
 
 ### 16. Haxe/C# SimHash Parity
 - The Haxe 64-bit SimHash uses the same algorithm as the C# `SimHashCalculator` (lower-cased `\w+` tokens hashed with CRC-64, per-bit voting), and a unit test asserts both produce the same fingerprint. See [HAXE.md](HAXE.md).
+
+### 17. Classified, User-Visible Fetch Errors
+- `CrawlErrorClassifier` walks the exception chain (`AuthenticationException`, `HttpRequestException.HttpRequestError`, `SocketException`, timeouts) and returns a `kind` plus a short message that travels on `PageCrawledEvent`, is stored on the page and rendered as badges. Because TLS failures are classified before any retry decision, the Polly policy skips them (no wasted back-off) while still retrying 5xx, 408, network errors and timeouts. A timeout caught only when the job token is not cancelled is the key distinction: otherwise `HttpClient`'s `TaskCanceledException` looks like a user cancel and the page silently disappears.

@@ -658,9 +658,12 @@ public class UnitTests
         Assert.NotEmpty(pageEvents);
         Assert.All(pageEvents, e => Assert.False(e.IsSuccess));
         var done = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.JobProgressUpdatedEvent>().Single();
-        Assert.Equal("Completed", done.Status);
+        // The start page itself could not be stored, so nothing was crawled: the job fails with a visible reason.
+        Assert.Equal("Failed", done.Status);
+        Assert.Contains("could not be saved", done.FailureReason);
         Assert.Equal(0, done.CrawledPagesCount);
         Assert.Equal(0, done.TotalBytesDownloaded);
+        Assert.All(pageEvents, e => Assert.Equal("storage", e.ErrorKind));
     }
 
     [Fact]
@@ -690,6 +693,80 @@ public class UnitTests
         });
 
         Assert.Equal(16000, all.Distinct().Count());
+    }
+
+    #endregion
+
+    #region Visible crawl errors (SSL/TLS, DNS, timeout)
+
+    [Fact]
+    public void CrawlErrorClassifier_TlsFailureInsideHttpRequestException_IsSsl()
+    {
+        var ex = new System.Net.Http.HttpRequestException("The SSL connection could not be established",
+            new System.Security.Authentication.AuthenticationException("The remote certificate is invalid according to the validation procedure: RemoteCertificateNameMismatch"));
+
+        var error = CrawlErrorClassifier.FromException(ex);
+
+        Assert.Equal(CrawlErrorClassifier.Ssl, error.Kind);
+        Assert.StartsWith("SSL/TLS error:", error.Message);
+        Assert.Contains("RemoteCertificateNameMismatch", error.Message);
+        Assert.True(CrawlErrorClassifier.IsTlsError(ex));
+    }
+
+    [Fact]
+    public void CrawlErrorClassifier_DnsTimeoutConnectionAndStatus_AreCategorised()
+    {
+        var dns = new System.Net.Http.HttpRequestException("x", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostNotFound));
+        Assert.Equal(CrawlErrorClassifier.Dns, CrawlErrorClassifier.FromException(dns).Kind);
+
+        var refused = new System.Net.Http.HttpRequestException("x", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused));
+        Assert.Equal(CrawlErrorClassifier.Connection, CrawlErrorClassifier.FromException(refused).Kind);
+
+        var timeout = new TaskCanceledException("t", new TimeoutException());
+        var timeoutError = CrawlErrorClassifier.FromException(timeout);
+        Assert.Equal(CrawlErrorClassifier.Timeout, timeoutError.Kind);
+        Assert.False(CrawlErrorClassifier.IsTlsError(timeout));
+
+        Assert.Equal("HTTP 404 Not Found", CrawlErrorClassifier.FromStatus(404, "Not Found").Message);
+        Assert.Equal(CrawlErrorClassifier.NonHtml, CrawlErrorClassifier.FromNonHtml("application/pdf").Kind);
+    }
+
+    [Fact]
+    public async Task CrawlerEngine_SslFailureOnStartPage_IsReportedOnPageAndFailsJobWithReason()
+    {
+        var handler = new TestHttpMessageHandler
+        {
+            Handler = _ => throw new System.Net.Http.HttpRequestException("ssl",
+                new System.Security.Authentication.AuthenticationException("The remote certificate is invalid: UntrustedRoot"))
+        };
+        var publisher = new TestPublishEndpoint();
+        var engine = new AltevaCrawler.Worker.Services.CrawlerEngine(new TestHttpClientFactory(handler), publisher,
+            new MockS3StorageService("test"), Microsoft.Extensions.Logging.Abstractions.NullLogger<AltevaCrawler.Worker.Services.CrawlerEngine>.Instance);
+
+        await engine.ProcessJobAsync("job-ssl", "https://bad-cert.example", maxDepth: 1, maxPagesLimit: 5);
+
+        var page = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.PageCrawledEvent>().Single();
+        Assert.False(page.IsSuccess);
+        Assert.Equal("ssl", page.ErrorKind);
+        Assert.Contains("UntrustedRoot", page.ErrorMessage);
+
+        var job = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.JobProgressUpdatedEvent>().Single();
+        Assert.Equal("Failed", job.Status);
+        Assert.Contains("SSL/TLS error", job.FailureReason);
+    }
+
+    [Fact]
+    public async Task CrawlerEngine_HttpTimeout_IsReportedAsTimeoutNotSilentlyDropped()
+    {
+        var handler = new TestHttpMessageHandler { Handler = _ => throw new TaskCanceledException("timed out", new TimeoutException()) };
+        var publisher = new TestPublishEndpoint();
+        var engine = new AltevaCrawler.Worker.Services.CrawlerEngine(new TestHttpClientFactory(handler), publisher,
+            new MockS3StorageService("test"), Microsoft.Extensions.Logging.Abstractions.NullLogger<AltevaCrawler.Worker.Services.CrawlerEngine>.Instance);
+
+        await engine.ProcessJobAsync("job-timeout", "https://slow.example", maxDepth: 1, maxPagesLimit: 5);
+
+        var page = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.PageCrawledEvent>().Single();
+        Assert.Equal("timeout", page.ErrorKind);
     }
 
     #endregion
