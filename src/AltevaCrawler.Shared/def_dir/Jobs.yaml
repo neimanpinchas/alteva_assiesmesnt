@@ -1,0 +1,22 @@
+T: Jobs
+PK: Id
+C:
+  - Id{36}*
+  - Url{2048}*
+  - MaxDepth#*
+  - Status{1}*
+  - TotalPagesCrawled#*
+  - TotalBytesDownloaded##*
+  - CreatedAt:
+      Type: datetime
+      Nullable: false
+  - StartedAt:
+      Type: datetime
+      Nullable: true
+  - CompletedAt:
+      Type: datetime
+      Nullable: true
+  - FailureReason{512}
+IDX:
+  - IX_Jobs_Status(Status)
+  - IX_Jobs_CreatedAt(CreatedAt)

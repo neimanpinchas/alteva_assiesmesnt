@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AltevaCrawler.Api/AltevaCrawler.Api.csproj" />
+    <Project Path="src/AltevaCrawler.Shared/AltevaCrawler.Shared.csproj" />
+    <Project Path="src/AltevaCrawler.Worker/AltevaCrawler.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AltevaCrawler.Tests/AltevaCrawler.Tests.csproj" />
+  </Folder>
+</Solution>

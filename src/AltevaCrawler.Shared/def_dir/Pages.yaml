@@ -1,0 +1,22 @@
+T: Pages
+PK: Id
+C:
+  - Id{36}*
+  - Url{2048}*
+  - NormalizedUrl{2048}*
+  - UrlCrc32#*
+  - DomainHash#*
+  - Domain{255}*
+  - SimHash##*
+  - ContentHash{64}
+  - StoragePath{512}
+  - StatusCode#*
+  - OutgoingLinksCount#*
+  - IsCrawled!*
+  - CrawledAt:
+      Type: datetime
+      Nullable: true
+IDX:
+  - IX_Pages_UrlCrc32(UrlCrc32)
+  - IX_Pages_DomainHash(DomainHash)
+  - IX_Pages_IsCrawled(IsCrawled)

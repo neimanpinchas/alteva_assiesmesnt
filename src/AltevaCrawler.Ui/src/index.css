@@ -1,0 +1,23 @@
+@import 'rc-tree/assets/index.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.rc-tree {
+  background: transparent !important;
+  color: #e2e8f0 !important;
+  font-family: inherit !important;
+}
+
+.rc-tree-title {
+  color: #f1f5f9 !important;
+}
+
+.rc-tree-node-content-wrapper:hover {
+  background-color: #334155 !important;
+}
+
+.rc-tree-node-selected {
+  background-color: #1e293b !important;
+}

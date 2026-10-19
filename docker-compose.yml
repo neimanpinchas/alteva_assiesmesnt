@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: alteva-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: alteva_crawler
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: alteva-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  crawl-api:
+    build:
+      context: .
+      dockerfile: src/AltevaCrawler.Api/Dockerfile
+    container_name: alteva-crawl-api
+    ports:
+      - "5000:80"
+    environment:
+      ConnectionStrings__DefaultConnection: "Server=mysql;Port=3306;Database=alteva_crawler;Uid=root;Pwd=rootpassword;"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__Username: "guest"
+      RabbitMQ__Password: "guest"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  crawl-worker:
+    build:
+      context: .
+      dockerfile: src/AltevaCrawler.Worker/Dockerfile
+    container_name: alteva-crawl-worker
+    environment:
+      ConnectionStrings__DefaultConnection: "Server=mysql;Port=3306;Database=alteva_crawler;Uid=root;Pwd=rootpassword;"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__Username: "guest"
+      RabbitMQ__Password: "guest"
+    volumes:
+      - crawler_storage:/app/storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  crawl-ui:
+    build:
+      context: .
+      dockerfile: src/AltevaCrawler.Ui/Dockerfile
+    container_name: alteva-crawl-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - crawl-api
+
+volumes:
+  mysql_data:
+  crawler_storage:

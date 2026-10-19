@@ -1,0 +1,8 @@
+-cp .
+-main Main
+-js ../AltevaCrawler.Ui/src/haxeGenerated/shared.js
+
+--next
+-cp .
+-main Main
+-cs ../AltevaCrawler.Shared/HaxeGenerated

@@ -1,0 +1,15 @@
+T: JobStatusTransitions
+PK: Id
+C:
+  - Id##+*
+  - JobId{36}*
+  - FromStatus{1}*
+  - ToStatus{1}*
+  - TransitionedAt:
+      Type: datetime
+      Nullable: false
+  - Reason{255}
+FK:
+  - Jobs(Id) -> JobId
+IDX:
+  - IX_JobTransitions_JobId(JobId)

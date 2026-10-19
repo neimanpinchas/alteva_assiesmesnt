@@ -1,0 +1,17 @@
+T: JobPageLinks
+PK: Id
+C:
+  - Id##+*
+  - JobId{36}*
+  - SourcePageId{36}*
+  - TargetPageId{36}*
+  - CreatedAt:
+      Type: datetime
+      Nullable: false
+FK:
+  - Jobs(Id) -> JobId
+  - Pages(Id) -> SourcePageId
+  - Pages(Id) -> TargetPageId
+IDX:
+  - IX_JobPageLinks_Job_Source(JobId, SourcePageId)
+  - IX_JobPageLinks_Job_Target(JobId, TargetPageId)
