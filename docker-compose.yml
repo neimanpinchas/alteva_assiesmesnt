@@ -90,9 +90,11 @@ services:
       PORT: "9000"
       WEBHOOK_SECRET: "alteva-secret-token-2026"
       PROJECT_DIR: "/app"
+      GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/app
+      - /root/.ssh:/root/.ssh:ro
     restart: always
 
 volumes:
