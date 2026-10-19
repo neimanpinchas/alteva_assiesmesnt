@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using System.Net.Http;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -26,12 +28,19 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
 
 builder.Services.AddHttpClient("CrawlClient", client =>
 {
-    client.Timeout = TimeSpan.FromSeconds(10);
-    client.DefaultRequestHeaders.Add("User-Agent", "AltevaCrawler/1.0 (+http://alteva.local)");
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
+    client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
+    client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AutomaticDecompression = DecompressionMethods.All,
+    ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
 })
 .AddPolicyHandler(HttpPolicyExtensions
-    .HandleTransientHttpError() // Handles 5xx and network errors; 4xx errors are excluded!
-    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+    .HandleTransientHttpError()
+    .WaitAndRetryAsync(2, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
 builder.Services.AddScoped<CrawlerEngine>();
 
@@ -50,7 +59,7 @@ builder.Services.AddMassTransit(x =>
         cfg.ReceiveEndpoint("crawl-job-queue", e =>
         {
             e.ConfigureConsumer<CrawlJobConsumer>(context);
-            e.UseMessageRetry(r => r.Interval(3, TimeSpan.FromSeconds(3)));
+            e.UseMessageRetry(r => r.Interval(2, TimeSpan.FromSeconds(2)));
         });
     });
 });
