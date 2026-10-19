@@ -14,6 +14,7 @@ using AltevaCrawler.Shared.Entities;
 using AltevaCrawler.Shared.Enums;
 using AltevaCrawler.Shared.Events;
 using AltevaCrawler.Shared.Models;
+using AltevaCrawler.Shared.Storage;
 using AltevaCrawler.Shared.Utilities;
 
 [ApiController]
@@ -22,11 +23,13 @@ public class JobsController : ControllerBase
 {
     private readonly AppDbContext _dbContext;
     private readonly IPublishEndpoint _publishEndpoint;
+    private readonly IStorageService _storageService;
 
-    public JobsController(AppDbContext dbContext, IPublishEndpoint publishEndpoint)
+    public JobsController(AppDbContext dbContext, IPublishEndpoint publishEndpoint, IStorageService storageService)
     {
         _dbContext = dbContext;
         _publishEndpoint = publishEndpoint;
+        _storageService = storageService;
     }
 
     [HttpPost]
@@ -43,7 +46,7 @@ public class JobsController : ControllerBase
             return BadRequest(new { error = "Invalid URL format." });
         }
 
-        string jobId = Guid.NewGuid().ToString();
+        string jobId = SequentialGuid.NewSequentialGuid().ToString();
         int maxDepth = request.MaxDepth ?? 2;
         int maxPagesLimit = request.MaxPagesLimit ?? 200;
 
@@ -131,7 +134,7 @@ public class JobsController : ControllerBase
         foreach (var page in pages)
         {
             runningPageCount++;
-            runningByteCount += 15000; // estimated/actual page size
+            runningByteCount += page.ByteSize;
             double elapsed = page.CrawledAt.HasValue && job.StartedAt.HasValue
                 ? Math.Max(1.0, (page.CrawledAt.Value - job.StartedAt.Value).TotalSeconds)
                 : 1.0;
@@ -420,15 +423,11 @@ public class JobsController : ControllerBase
             return NotFound(new { error = "Page content file not found on disk." });
         }
 
-        string rootStorage = Path.Combine(Directory.GetCurrentDirectory(), "storage");
-        string fullPath = Path.Combine(rootStorage, page.StoragePath);
-
-        if (!StoragePathBuilder.IsUnderRoot(fullPath, rootStorage) || !System.IO.File.Exists(fullPath))
+        string? html = await _storageService.ReadPageAsync(page.StoragePath);
+        if (html == null)
         {
             return NotFound(new { error = "Page file path security check failed or file missing." });
         }
-
-        string html = await System.IO.File.ReadAllTextAsync(fullPath);
 
         var doc = new HtmlAgilityPack.HtmlDocument();
         doc.LoadHtml(html);
@@ -572,9 +571,9 @@ public class JobsController : ControllerBase
                 var pageToPrune = await _dbContext.Pages.FirstOrDefaultAsync(p => p.Id == pageId);
                 if (pageToPrune != null)
                 {
-                    if (!string.IsNullOrEmpty(pageToPrune.StoragePath) && System.IO.File.Exists(pageToPrune.StoragePath))
+                    if (!string.IsNullOrEmpty(pageToPrune.StoragePath))
                     {
-                        try { System.IO.File.Delete(pageToPrune.StoragePath); } catch { }
+                        await _storageService.DeletePageAsync(pageToPrune.StoragePath);
                     }
                     _dbContext.Pages.Remove(pageToPrune);
                 }

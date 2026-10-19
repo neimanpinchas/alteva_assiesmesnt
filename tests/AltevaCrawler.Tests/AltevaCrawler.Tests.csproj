@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AltevaCrawler.Shared\AltevaCrawler.Shared.csproj" />
     <ProjectReference Include="..\..\src\AltevaCrawler.Api\AltevaCrawler.Api.csproj" />
+    <ProjectReference Include="..\..\src\AltevaCrawler.Worker\AltevaCrawler.Worker.csproj" />
   </ItemGroup>
 
 </Project>

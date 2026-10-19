@@ -34,6 +34,13 @@ public record PageCrawledEvent
     public long ByteSize { get; init; }
     public int OutgoingLinksCount { get; init; }
     public DateTime CrawledAt { get; init; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// True only for a fetched, stored HTML page (2xx with content). Dead links, fetch errors,
+    /// non-HTML responses and storage failures are reported with the same event but are not "crawled pages".
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsSuccess => StatusCode is >= 200 and < 300 && ByteSize > 0;
 }
 
 public record JobProgressUpdatedEvent
@@ -43,6 +50,7 @@ public record JobProgressUpdatedEvent
     public int CrawledPagesCount { get; init; }
     public int DiscoveredPagesCount { get; init; }
     public long TotalBytesDownloaded { get; init; }
+    public string? FailureReason { get; init; }
     public DateTime UpdatedAt { get; init; } = DateTime.UtcNow;
 }
 

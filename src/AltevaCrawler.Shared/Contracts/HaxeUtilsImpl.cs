@@ -17,9 +17,19 @@ public class HaxeUtilsImpl : IUrlUtils, ISimHash, ICrypto
         return global::SimHash.computeSimHash32(text ?? string.Empty);
     }
 
+    public long ComputeSimHash64(string text)
+    {
+        return global::SimHash.computeSimHash64(text ?? string.Empty);
+    }
+
     public int HammingDistance(float h1, float h2)
     {
         return global::SimHash.hammingDistance(h1, h2);
+    }
+
+    public int HammingDistance64(long h1, long h2)
+    {
+        return global::SimHash.hammingDistance64(h1, h2);
     }
 
     public string CreateSimpleAuthToken(string sessionId, string secretKey)
@@ -42,7 +52,9 @@ public class HaxeUrlUtils : IUrlUtils
 public class HaxeSimHash : ISimHash
 {
     public int ComputeSimHash32(string text) => global::SimHash.computeSimHash32(text ?? string.Empty);
+    public long ComputeSimHash64(string text) => global::SimHash.computeSimHash64(text ?? string.Empty);
     public int HammingDistance(float h1, float h2) => global::SimHash.hammingDistance(h1, h2);
+    public int HammingDistance64(long h1, long h2) => global::SimHash.hammingDistance64(h1, h2);
 }
 
 public class HaxeCrypto : ICrypto

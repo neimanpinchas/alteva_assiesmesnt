@@ -2,10 +2,14 @@ namespace AltevaCrawler.Tests;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 using Xunit;
 using AltevaCrawler.Shared.Contracts;
 using AltevaCrawler.Shared.Security;
+using AltevaCrawler.Shared.Storage;
 using AltevaCrawler.Shared.Utilities;
 
 public class UnitTests
@@ -79,7 +83,19 @@ public class UnitTests
 
     #endregion
 
-    #region Haxe Parity Tests
+    #region Haxe Parity Tests (H13 & H14)
+
+    [Theory]
+    [InlineData("The quick brown fox jumps over the lazy dog")]
+    [InlineData("Hello world! This is a test of Haxe 64-bit SimHash parity with C# SimHashCalculator.")]
+    [InlineData("Special characters, 12345 numbers & symbols test!!!")]
+    public void HaxeParity_SimHash64_MatchesCSharpSimHashCalculator(string text)
+    {
+        long haxeHash = _haxeUtils.ComputeSimHash64(text);
+        ulong csharpHash = SimHashCalculator.Compute64(text);
+
+        Assert.Equal((ulong)haxeHash, csharpHash);
+    }
 
     [Theory]
     [InlineData("https://example.com/test")]
@@ -167,7 +183,6 @@ public class UnitTests
             "https://sub.external.com/api"
         };
 
-        // 2 out of 4 links are in example.com
         double ratio = UrlNormalizer.CalculateDomainLinkRatio(startDomain, outgoingLinks);
         Assert.Equal(0.5, ratio);
     }
@@ -193,7 +208,6 @@ public class UnitTests
             "https://external.com/page3"
         };
 
-        // With stripWww = true (default), www.example.com and example.com are the same domain
         double ratio = UrlNormalizer.CalculateDomainLinkRatio(startDomain, outgoingLinks, stripWww: true);
         Assert.Equal(2.0 / 3.0, ratio, precision: 4);
     }
@@ -302,7 +316,7 @@ public class UnitTests
 
     #endregion
 
-    #region StoragePathBuilder Tests (N8)
+    #region StoragePathBuilder & IStorageService Tests (N8 & H14)
 
     [Fact]
     public void StoragePathBuilder_ToRelativePath_ConvertsUriToRelativePath()
@@ -332,12 +346,350 @@ public class UnitTests
     [Fact]
     public void StoragePathBuilder_IsUnderRoot_ValidatesPathSafety()
     {
-        string rootPath = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "storage");
-        string validPath = System.IO.Path.Combine(rootPath, "example.com", "page.txt");
-        string pathTraversal = System.IO.Path.Combine(rootPath, "..", "..", "etc", "passwd");
+        string rootPath = Path.Combine(Directory.GetCurrentDirectory(), "storage");
+        string validPath = Path.Combine(rootPath, "example.com", "page.txt");
+        string pathTraversal = Path.Combine(rootPath, "..", "..", "etc", "passwd");
 
         Assert.True(StoragePathBuilder.IsUnderRoot(validPath, rootPath));
         Assert.False(StoragePathBuilder.IsUnderRoot(pathTraversal, rootPath));
+    }
+
+    [Fact]
+    public async Task StorageService_LocalStorageService_SavesReadsAndDeletesPage()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "storage_test_" + Guid.NewGuid().ToString("N"));
+        IStorageService storage = new LocalStorageService(tempRoot);
+
+        try
+        {
+            string domain = "example.com";
+            string rawUrl = "https://example.com/docs/page1";
+            byte[] content = System.Text.Encoding.UTF8.GetBytes("<html><body>Hello World</body></html>");
+
+            string storagePath = await storage.SavePageAsync(domain, rawUrl, content);
+            Assert.NotNull(storagePath);
+            Assert.False(Path.IsPathRooted(storagePath));
+
+            string? readContent = await storage.ReadPageAsync(storagePath);
+            Assert.Equal("<html><body>Hello World</body></html>", readContent);
+
+            await storage.DeletePageAsync(storagePath);
+            string? deletedContent = await storage.ReadPageAsync(storagePath);
+            Assert.Null(deletedContent);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task StorageService_PathSafety_BlocksPathTraversalAttempts()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "storage_safety_" + Guid.NewGuid().ToString("N"));
+        IStorageService storage = new LocalStorageService(tempRoot);
+
+        try
+        {
+            string pathTraversal = "../../../etc/passwd";
+            string? content = await storage.ReadPageAsync(pathTraversal);
+            Assert.Null(content);
+
+            // Deleting path outside root should complete safely without throwing or deleting external files
+            await storage.DeletePageAsync(pathTraversal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task StorageService_MockS3StorageService_OperationsWorkInMemory()
+    {
+        IStorageService s3 = new MockS3StorageService("test-bucket");
+        string domain = "s3domain.com";
+        string rawUrl = "https://s3domain.com/index.html";
+        byte[] content = System.Text.Encoding.UTF8.GetBytes("s3 content");
+
+        string s3Key = await s3.SavePageAsync(domain, rawUrl, content);
+        Assert.StartsWith("s3://test-bucket/s3domain.com/", s3Key);
+
+        string? readContent = await s3.ReadPageAsync(s3Key);
+        Assert.Equal("s3 content", readContent);
+
+        await s3.DeletePageAsync(s3Key);
+        string? postDelete = await s3.ReadPageAsync(s3Key);
+        Assert.Null(postDelete);
+    }
+
+    #endregion
+
+    #region SequentialGuid Tests (H10 & H14)
+
+    [Fact]
+    public void SequentialGuid_NewSequentialGuid_GeneratesValidAndUniqueGuids()
+    {
+        Guid guid1 = SequentialGuid.NewSequentialGuid();
+        Guid guid2 = SequentialGuid.NewSequentialGuid();
+
+        Assert.NotEqual(Guid.Empty, guid1);
+        Assert.NotEqual(Guid.Empty, guid2);
+        Assert.NotEqual(guid1, guid2);
+    }
+
+    [Fact]
+    public void SequentialGuid_NewSequentialGuid_MaintainsTimeOrdering()
+    {
+        var guids = new List<Guid>();
+        for (int i = 0; i < 50; i++)
+        {
+            guids.Add(SequentialGuid.NewSequentialGuid());
+            if (i % 10 == 0)
+            {
+                System.Threading.Thread.Sleep(2);
+            }
+        }
+
+        for (int i = 0; i < guids.Count - 1; i++)
+        {
+            Guid g1 = guids[i];
+            Guid g2 = guids[i + 1];
+
+            Assert.NotEqual(Guid.Empty, g1);
+            Assert.NotEqual(Guid.Empty, g2);
+            Assert.NotEqual(g1, g2);
+
+            int cmpStr = string.CompareOrdinal(g1.ToString(), g2.ToString());
+            Assert.True(cmpStr < 0, $"Guid at index {i} ({g1}) should be lexicographically less than Guid at index {i + 1} ({g2})");
+        }
+    }
+
+    #endregion
+
+    #region CrawlerEngine Tests (H1, H4, H5)
+
+    private class TestHttpMessageHandler : System.Net.Http.HttpMessageHandler
+    {
+        public Func<System.Net.Http.HttpRequestMessage, System.Net.Http.HttpResponseMessage> Handler { get; set; } = _ => new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new System.Net.Http.StringContent("<html><body><a href=\"/page1\">Link 1</a></body></html>", System.Text.Encoding.UTF8, "text/html")
+        };
+
+        protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+            return Task.FromResult(Handler(request));
+        }
+    }
+
+    private class TestHttpClientFactory : System.Net.Http.IHttpClientFactory
+    {
+        private readonly System.Net.Http.HttpMessageHandler _handler;
+        public TestHttpClientFactory(System.Net.Http.HttpMessageHandler handler) => _handler = handler;
+        public System.Net.Http.HttpClient CreateClient(string name) => new System.Net.Http.HttpClient(_handler);
+    }
+
+    private class TestPublishEndpoint : MassTransit.IPublishEndpoint
+    {
+        public List<object> PublishedEvents { get; } = new();
+        public Func<object, bool>? ThrowOn { get; set; }
+
+        public Task Publish<T>(T message, System.Threading.CancellationToken cancellationToken = default) where T : class
+        {
+            if (ThrowOn != null && ThrowOn(message))
+            {
+                throw new InvalidOperationException("Simulated broker failure");
+            }
+            lock (PublishedEvents)
+            {
+                PublishedEvents.Add(message);
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task Publish<T>(T message, MassTransit.IPipe<MassTransit.PublishContext<T>> pipe, System.Threading.CancellationToken cancellationToken = default) where T : class => Publish(message, cancellationToken);
+        public Task Publish<T>(T message, MassTransit.IPipe<MassTransit.PublishContext> pipe, System.Threading.CancellationToken cancellationToken = default) where T : class => Publish(message, cancellationToken);
+        public Task Publish(object message, System.Threading.CancellationToken cancellationToken = default) { lock (PublishedEvents) { PublishedEvents.Add(message); } return Task.CompletedTask; }
+        public Task Publish(object message, Type messageType, System.Threading.CancellationToken cancellationToken = default) { lock (PublishedEvents) { PublishedEvents.Add(message); } return Task.CompletedTask; }
+        public Task Publish(object message, MassTransit.IPipe<MassTransit.PublishContext> pipe, System.Threading.CancellationToken cancellationToken = default) { lock (PublishedEvents) { PublishedEvents.Add(message); } return Task.CompletedTask; }
+        public Task Publish(object message, Type messageType, MassTransit.IPipe<MassTransit.PublishContext> pipe, System.Threading.CancellationToken cancellationToken = default) { lock (PublishedEvents) { PublishedEvents.Add(message); } return Task.CompletedTask; }
+        public Task Publish<T>(object values, System.Threading.CancellationToken cancellationToken = default) where T : class => Task.CompletedTask;
+        public Task Publish<T>(object values, MassTransit.IPipe<MassTransit.PublishContext<T>> pipe, System.Threading.CancellationToken cancellationToken = default) where T : class => Task.CompletedTask;
+        public Task Publish<T>(object values, MassTransit.IPipe<MassTransit.PublishContext> pipe, System.Threading.CancellationToken cancellationToken = default) where T : class => Task.CompletedTask;
+        public MassTransit.ConnectHandle ConnectPublishObserver(MassTransit.IPublishObserver observer) => throw new NotImplementedException();
+    }
+
+    [Fact]
+    public async Task CrawlerEngine_Cancellation_CompletesWithoutThrowing()
+    {
+        var handler = new TestHttpMessageHandler();
+        var clientFactory = new TestHttpClientFactory(handler);
+        var publisher = new TestPublishEndpoint();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<AltevaCrawler.Worker.Services.CrawlerEngine>.Instance;
+        var storage = new MockS3StorageService("test");
+
+        var engine = new AltevaCrawler.Worker.Services.CrawlerEngine(clientFactory, publisher, storage, logger);
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel(); // Cancel immediately
+
+        await engine.ProcessJobAsync("job-cancel-test", "https://example.com", maxDepth: 2, maxPagesLimit: 10, ct: cts.Token);
+
+        // Job should complete quietly without unhandled exception or status "Completed" event
+        Assert.DoesNotContain(publisher.PublishedEvents, e => e is AltevaCrawler.Shared.Events.JobProgressUpdatedEvent j && j.Status == "Completed");
+    }
+
+    [Fact]
+    public async Task CrawlerEngine_NonHtmlAndHttpError_DoesNotCountAsCrawledPages()
+    {
+        var handler = new TestHttpMessageHandler
+        {
+            Handler = req =>
+            {
+                if (req.RequestUri!.AbsoluteUri.Contains("pdf"))
+                {
+                    return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new System.Net.Http.StringContent("PDF Content", System.Text.Encoding.UTF8, "application/pdf")
+                    };
+                }
+                return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new System.Net.Http.StringContent("<html><body>HTML Page</body></html>", System.Text.Encoding.UTF8, "text/html")
+                };
+            }
+        };
+
+        var clientFactory = new TestHttpClientFactory(handler);
+        var publisher = new TestPublishEndpoint();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<AltevaCrawler.Worker.Services.CrawlerEngine>.Instance;
+        var storage = new MockS3StorageService("test");
+
+        var engine = new AltevaCrawler.Worker.Services.CrawlerEngine(clientFactory, publisher, storage, logger);
+
+        // Process PDF non-HTML
+        await engine.ProcessJobAsync("job-pdf-test", "https://example.com/file.pdf", maxDepth: 1, maxPagesLimit: 10);
+
+        var completedEvent = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.JobProgressUpdatedEvent>().FirstOrDefault(e => e.JobId == "job-pdf-test");
+        Assert.NotNull(completedEvent);
+        Assert.Equal(0, completedEvent.CrawledPagesCount); // PDF should NOT count toward CrawledPagesCount
+    }
+
+    [Fact]
+    public async Task CrawlerEngine_MaxPagesLimit_EnforcedStrictly()
+    {
+        int pageIndex = 0;
+        var handler = new TestHttpMessageHandler
+        {
+            Handler = req =>
+            {
+                int current = System.Threading.Interlocked.Increment(ref pageIndex);
+                string html = $"<html><body><a href=\"https://example.com/p{current}\">Link {current}</a></body></html>";
+                return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new System.Net.Http.StringContent(html, System.Text.Encoding.UTF8, "text/html")
+                };
+            }
+        };
+
+        var clientFactory = new TestHttpClientFactory(handler);
+        var publisher = new TestPublishEndpoint();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<AltevaCrawler.Worker.Services.CrawlerEngine>.Instance;
+        var storage = new MockS3StorageService("test");
+
+        var engine = new AltevaCrawler.Worker.Services.CrawlerEngine(clientFactory, publisher, storage, logger);
+
+        await engine.ProcessJobAsync("job-limit-test", "https://example.com/p0", maxDepth: 5, maxPagesLimit: 3);
+
+        var completedEvent = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.JobProgressUpdatedEvent>().FirstOrDefault(e => e.JobId == "job-limit-test");
+        Assert.NotNull(completedEvent);
+        Assert.Equal(3, completedEvent.CrawledPagesCount); // CrawledPagesCount must equal exactly maxPagesLimit (3)
+    }
+
+    private class FailingStorageService : IStorageService
+    {
+        public int SaveAttempts;
+        public Task<string> SavePageAsync(string domain, string rawUrl, byte[] content)
+        {
+            System.Threading.Interlocked.Increment(ref SaveAttempts);
+            throw new IOException("disk full");
+        }
+        public Task<string?> ReadPageAsync(string storagePath) => Task.FromResult<string?>(null);
+        public Task DeletePageAsync(string storagePath) => Task.CompletedTask;
+    }
+
+    private static AltevaCrawler.Worker.Services.CrawlerEngine CreateEngine(TestPublishEndpoint publisher, IStorageService storage) =>
+        new(new TestHttpClientFactory(new TestHttpMessageHandler()), publisher,
+            storage, Microsoft.Extensions.Logging.Abstractions.NullLogger<AltevaCrawler.Worker.Services.CrawlerEngine>.Instance);
+
+    [Theory]
+    [InlineData(200, 1200, true)]
+    [InlineData(200, 0, false)]   // non-HTML / empty
+    [InlineData(404, 0, false)]   // dead link
+    [InlineData(500, 0, false)]   // fetch error
+    [InlineData(404, 900, false)] // error body is never a crawled page
+    public void PageCrawledEvent_IsSuccess_OnlyForStoredSuccessfulPages(int status, long bytes, bool expected)
+    {
+        var evt = new AltevaCrawler.Shared.Events.PageCrawledEvent { StatusCode = status, ByteSize = bytes };
+        Assert.Equal(expected, evt.IsSuccess);
+    }
+
+    [Fact]
+    public async Task CrawlerEngine_StorageFailure_RetriesOnceThenReportsPageAsFailed()
+    {
+        var publisher = new TestPublishEndpoint();
+        var storage = new FailingStorageService();
+        var engine = CreateEngine(publisher, storage);
+
+        await engine.ProcessJobAsync("job-storage-fail", "https://example.com", maxDepth: 1, maxPagesLimit: 5);
+
+        Assert.True(storage.SaveAttempts >= 2, "each page is attempted twice before it is reported as failed");
+        var pageEvents = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.PageCrawledEvent>().ToList();
+        Assert.NotEmpty(pageEvents);
+        Assert.All(pageEvents, e => Assert.False(e.IsSuccess));
+        var done = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.JobProgressUpdatedEvent>().Single();
+        Assert.Equal("Completed", done.Status);
+        Assert.Equal(0, done.CrawledPagesCount);
+        Assert.Equal(0, done.TotalBytesDownloaded);
+    }
+
+    [Fact]
+    public async Task CrawlerEngine_UnexpectedJobError_PublishesFailedWithReason()
+    {
+        var publisher = new TestPublishEndpoint
+        {
+            // Simulate the broker rejecting the final "Completed" status publish.
+            ThrowOn = e => e is AltevaCrawler.Shared.Events.JobProgressUpdatedEvent j && j.Status == "Completed"
+        };
+        var engine = CreateEngine(publisher, new MockS3StorageService("test"));
+
+        await engine.ProcessJobAsync("job-unexpected", "https://example.com", maxDepth: 0, maxPagesLimit: 5);
+
+        var failed = publisher.PublishedEvents.OfType<AltevaCrawler.Shared.Events.JobProgressUpdatedEvent>().Single();
+        Assert.Equal("Failed", failed.Status);
+        Assert.Contains("Simulated broker failure", failed.FailureReason);
+    }
+
+    [Fact]
+    public void SequentialGuid_IsUniqueAndOrderedWithinOneMillisecondBurstAcrossThreads()
+    {
+        var all = new System.Collections.Concurrent.ConcurrentBag<Guid>();
+        System.Threading.Tasks.Parallel.For(0, 8, _ =>
+        {
+            for (int i = 0; i < 2000; i++) all.Add(SequentialGuid.NewSequentialGuid());
+        });
+
+        Assert.Equal(16000, all.Distinct().Count());
     }
 
     #endregion

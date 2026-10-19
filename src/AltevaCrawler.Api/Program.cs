@@ -129,6 +129,7 @@ using (var scope = app.Services.CreateScope())
     {
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         dbContext.Database.EnsureCreated();
+        await SchemaUpgrader.ApplyAsync(dbContext, app.Logger);
     }
     catch (Exception ex)
     {

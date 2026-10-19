@@ -467,6 +467,8 @@ M System.Security.Policy.StrongNameMembershipCondition
 M System.Collections.Generic.ICollection`1
 M cs.system.security.policy.TrustManagerUIContext
 M System.Reflection.IReflect
+M EReg
+C EReg
 M System.Reflection.Emit.AssemblyBuilder
 M System.Math
 M cs.system.security.policy.PolicyStatementAttribute

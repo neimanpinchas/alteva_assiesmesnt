@@ -44,7 +44,6 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
             {
                 Url = msg.Url,
                 NormalizedUrl = msg.Url,
-                UrlCrc32 = msg.UrlCrc32,
                 Domain = UrlNormalizer.ExtractDomain(msg.Url),
                 DomainHash = domainHash,
                 SimHash = msg.SimHash,
@@ -60,7 +59,7 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
         }
         else
         {
-            bool isFailure = msg.StatusCode >= 400 || msg.ByteSize == 0;
+            bool isFailure = !msg.IsSuccess;
 
             if (!isFailure || page.SimHash == 0)
             {
@@ -85,8 +84,12 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
             page.CrawledAt = msg.CrawledAt;
         }
 
-        dbJob.TotalPagesCrawled++;
-        dbJob.TotalBytesDownloaded += msg.ByteSize;
+        // Dead links, fetch errors and non-HTML responses are recorded on the page but are not crawled pages.
+        if (msg.IsSuccess)
+        {
+            dbJob.TotalPagesCrawled++;
+            dbJob.TotalBytesDownloaded += msg.ByteSize;
+        }
         if (dbJob.Status == JobStatus.Pending)
         {
             dbJob.Status = JobStatus.Running;
@@ -141,7 +144,6 @@ public class ApiLinkDiscoveredConsumer : IConsumer<LinkDiscoveredEvent>
             {
                 Url = msg.TargetUrl,
                 NormalizedUrl = msg.TargetUrl,
-                UrlCrc32 = msg.TargetUrlCrc32,
                 Domain = targetDomain,
                 DomainHash = UrlNormalizer.ComputeDomainHash(targetDomain),
                 IsCrawled = false
@@ -205,7 +207,19 @@ public class ApiJobProgressConsumer : IConsumer<JobProgressUpdatedEvent>
             }
             else if (msg.Status == "Failed")
             {
+                char previousStatus = job.StatusChar;
                 job.Status = JobStatus.Failed;
+                job.CompletedAt = DateTime.UtcNow;
+                string reason = string.IsNullOrWhiteSpace(msg.FailureReason) ? "Crawl failed." : msg.FailureReason;
+                job.FailureReason = reason.Length > 512 ? reason[..512] : reason;
+                _dbContext.JobStatusTransitions.Add(new JobStatusTransition
+                {
+                    JobId = job.Id,
+                    FromStatus = previousStatus,
+                    ToStatus = JobStatus.Failed.ToChar(),
+                    TransitionedAt = DateTime.UtcNow,
+                    Reason = job.FailureReason.Length > 255 ? job.FailureReason[..255] : job.FailureReason
+                });
             }
             else if (msg.Status == "Paused")
             {

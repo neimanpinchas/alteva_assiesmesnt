@@ -6,6 +6,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 using AltevaCrawler.Shared.Enums;
+using AltevaCrawler.Shared.Utilities;
 
 [Table("Jobs")]
 [Index(nameof(StatusChar), Name = "IX_Jobs_Status")]
@@ -14,7 +15,7 @@ public class Job
 {
     [Key]
     [MaxLength(36)]
-    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Id { get; set; } = SequentialGuid.NewSequentialGuid().ToString();
 
     [Required]
     [MaxLength(2048)]

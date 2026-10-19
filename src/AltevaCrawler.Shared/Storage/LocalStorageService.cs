@@ -21,6 +21,11 @@ public class LocalStorageService : IStorageService
         string relativePath = StoragePathBuilder.ToRelativePath(uri ?? new Uri($"https://{domain}"));
         string fullPath = Path.Combine(_storageRoot, relativePath);
 
+        if (!StoragePathBuilder.IsUnderRoot(fullPath, _storageRoot))
+        {
+            throw new InvalidOperationException($"Refusing to write outside the storage root: {relativePath}");
+        }
+
         string? parentDir = Path.GetDirectoryName(fullPath);
         if (parentDir != null) Directory.CreateDirectory(parentDir);
 

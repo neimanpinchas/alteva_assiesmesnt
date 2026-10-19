@@ -2,7 +2,7 @@
 import './haxeGenerated/shared.js';
 import { JobSummary, TreeNodeDto, JobMetricsDto, PageSearchResultDto, PageContentDto } from './types';
 
-const API_BASE = '/api';
+const API_BASE = 'api';
 let authToken: string | null = null;
 
 export async function getAuthToken(): Promise<string> {

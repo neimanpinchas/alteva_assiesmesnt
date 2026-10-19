@@ -24,7 +24,13 @@ public class Page
     [MaxLength(2048)]
     public string NormalizedUrl { get; set; } = string.Empty;
 
-    public uint UrlCrc32 { get; set; }
+    /// <summary>
+    /// CRC32 of <see cref="NormalizedUrl"/>, computed by MySQL as a persisted (STORED) generated column
+    /// (see <c>AppDbContext</c>) and indexed. Never assigned from code: lookups filter on this integer first,
+    /// then compare the exact URL (CRC32 is not collision free).
+    /// </summary>
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
+    public uint UrlCrc32 { get; private set; }
 
     public uint DomainHash { get; set; }
 

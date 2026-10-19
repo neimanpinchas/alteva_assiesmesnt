@@ -16,16 +16,129 @@ public class SimHash : global::haxe.lang.HxObject {
 	}
 	
 	
+	public static long makeBit(int i) {
+		unchecked {
+			if (( i < 32 )) {
+				return ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (( 1 << i )) ) & 0xffffffffL ) )) );
+			}
+			else {
+				return ((long) (( ( ((long) (( 1 << ( i - 32 ) )) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+			}
+			
+		}
+	}
+	
+	
+	public static long crc64(string str) {
+		unchecked {
+			long poly = ((long) (( ( ((long) (1123082731) ) << 32 ) | ( ((long) (-1444268397) ) & 0xffffffffL ) )) );
+			long crc = ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+			global::haxe.io.Bytes bytes = global::haxe.io.Bytes.ofString(str, null);
+			long mask = ((long) (( ( ((long) (-2147483648) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+			long zero = ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+			{
+				int _g = 0;
+				int _g1 = bytes.length;
+				while (( _g < _g1 )) {
+					int b = _g++;
+					int byteVal = ((int) (bytes.b[b]) );
+					long byte64 = ((long) (( ( ((long) (( byteVal << 24 )) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+					crc = ((long) (( ((long) (crc) ) ^ ((long) (byte64) ) )) );
+					{
+						{
+							bool topBitSet = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+						{
+							bool topBitSet1 = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet1) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+						{
+							bool topBitSet2 = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet2) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+						{
+							bool topBitSet3 = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet3) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+						{
+							bool topBitSet4 = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet4) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+						{
+							bool topBitSet5 = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet5) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+						{
+							bool topBitSet6 = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet6) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+						{
+							bool topBitSet7 = ( (((long) (( ((long) (crc) ) & ((long) (mask) ) )) )) != ((long) (zero) ) );
+							crc = ((long) (( ((long) (crc) ) << 1 )) );
+							if (topBitSet7) {
+								crc = ((long) (( ((long) (crc) ) ^ ((long) (poly) ) )) );
+							}
+							
+						}
+						
+					}
+					
+				}
+				
+			}
+			
+			return crc;
+		}
+	}
+	
+	
 	public static int hammingDistance64(long h1, long h2) {
 		unchecked {
 			long x = ((long) (( ((long) (h1) ) ^ ((long) (h2) ) )) );
 			int count = 0;
+			long zero = ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
 			{
 				int _g = 0;
 				while (( _g < 64 )) {
 					int i = _g++;
-					long bit = ( (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (1) ) & 0xffffffffL ) )) )) << i );
-					if (( (((long) (( ((long) (x) ) & ((long) (bit) ) )) )) != (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) )) )) {
+					long bit = global::SimHash.makeBit(i);
+					if (( (((long) (( ((long) (x) ) & ((long) (bit) ) )) )) != ((long) (zero) ) )) {
 						 ++ count;
 					}
 					
@@ -60,7 +173,20 @@ public class SimHash : global::haxe.lang.HxObject {
 				return ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
 			}
 			
-			global::Array<string> words = global::haxe.lang.StringExt.split(text, " ");
+			string lower = text.ToLowerInvariant();
+			global::EReg r = new global::EReg(((string) ("\\w+") ), ((string) ("g") ));
+			global::Array<string> words = new global::Array<string>(new string[]{});
+			if (r.match(lower)) {
+				do {
+					words.push(r.matched(0));
+				}
+				while (r.matchSub(lower, ( ((int) (global::haxe.lang.Runtime.getField_f(r.matchedPos(), "pos", 5594516, true)) ) + ((int) (global::haxe.lang.Runtime.getField_f(r.matchedPos(), "len", 5393365, true)) ) ), default(global::haxe.lang.Null<int>)));
+			}
+			
+			if (( words.length == 0 )) {
+				return ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+			}
+			
 			global::Array<int> _g = new global::Array<int>(new int[]{});
 			{
 				int _g1 = 0;
@@ -77,19 +203,12 @@ public class SimHash : global::haxe.lang.HxObject {
 				while (( _g2 < words.length )) {
 					string w = words[_g2];
 					 ++ _g2;
-					if (( w.Length == 0 )) {
-						continue;
-					}
-					
-					global::haxe.io.Bytes shaBytes = global::haxe.crypto.Sha256.make(global::haxe.io.Bytes.ofString(w, null));
-					int hHigh = ( ( ( ( ((int) (shaBytes.b[0]) ) << 24 ) | ( ((int) (shaBytes.b[1]) ) << 16 ) ) | ( ((int) (shaBytes.b[2]) ) << 8 ) ) | ((int) (shaBytes.b[3]) ) );
-					int hLow = ( ( ( ( ((int) (shaBytes.b[4]) ) << 24 ) | ( ((int) (shaBytes.b[5]) ) << 16 ) ) | ( ((int) (shaBytes.b[6]) ) << 8 ) ) | ((int) (shaBytes.b[7]) ) );
-					long hash = ((long) (( ( ((long) (hHigh) ) << 32 ) | ( ((long) (hLow) ) & 0xffffffffL ) )) );
+					long hash = global::SimHash.crc64(w);
 					{
 						int _g3 = 0;
 						while (( _g3 < 64 )) {
 							int i1 = _g3++;
-							long bit = ( (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (1) ) & 0xffffffffL ) )) )) << i1 );
+							long bit = global::SimHash.makeBit(i1);
 							if (( (((long) (( ((long) (hash) ) & ((long) (bit) ) )) )) != (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) )) )) {
 								v[i1] += 1;
 							}
@@ -111,7 +230,7 @@ public class SimHash : global::haxe.lang.HxObject {
 				while (( _g4 < 64 )) {
 					int i2 = _g4++;
 					if (( v[i2] > 0 )) {
-						fingerPrint = ( ((long) (fingerPrint) ) | ((long) (( (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (1) ) & 0xffffffffL ) )) )) << i2 )) ) );
+						fingerPrint = ( ((long) (fingerPrint) ) | ((long) (global::SimHash.makeBit(i2)) ) );
 					}
 					
 				}

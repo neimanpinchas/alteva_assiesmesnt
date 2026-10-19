@@ -1,6 +1,8 @@
 using System;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using MassTransit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -9,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.Extensions.Http;
 using AltevaCrawler.Shared.Data;
@@ -85,7 +88,8 @@ builder.Services.AddMassTransit(x =>
     });
 });
 
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddCheck<MassTransitBusHealthCheck>("masstransit_bus");
 
 var app = builder.Build();
 
@@ -95,7 +99,40 @@ using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
     using var dbContext = dbFactory.CreateDbContext();
-    try { dbContext.Database.EnsureCreated(); } catch { }
+    try
+    {
+        dbContext.Database.EnsureCreated();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+        logger?.LogWarning(ex, "Failed to initialize database during worker startup.");
+    }
 }
 
 app.Run("http://0.0.0.0:5001");
+
+public class MassTransitBusHealthCheck : IHealthCheck
+{
+    private readonly IBusControl _busControl;
+
+    public MassTransitBusHealthCheck(IBusControl busControl)
+    {
+        _busControl = busControl;
+    }
+
+    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        var health = _busControl.CheckHealth();
+        if (health.Status.ToString() == "Healthy")
+        {
+            return Task.FromResult(HealthCheckResult.Healthy("MassTransit bus is active and healthy."));
+        }
+        else if (health.Status.ToString() == "Degraded")
+        {
+            return Task.FromResult(HealthCheckResult.Degraded("MassTransit bus is degraded."));
+        }
+
+        return Task.FromResult(HealthCheckResult.Unhealthy("MassTransit bus is unhealthy."));
+    }
+}

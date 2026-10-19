@@ -105,6 +105,8 @@
 	
     <Compile Include="src\cs\Lib.cs"/>
 	
+    <Compile Include="src\EReg.cs"/>
+	
     <Compile Include="src\cs\internal\HxObject.cs"/>
 	
     <Compile Include="src\cs\internal\FieldLookup.cs"/>

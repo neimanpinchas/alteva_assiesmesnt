@@ -25,21 +25,32 @@ This document highlights all edge cases, network behaviors, concurrency race con
 ## 3. Concurrency, Message Ordering & Foreign Key Race Conditions
 - **Event Out-of-Order Delivery**: `ApiLinkDiscoveredConsumer` and `ApiPageCrawledConsumer` check if a `Job` exists in MySQL before creating `JobPageLinks` records, preventing orphan foreign key (`FK_JobPageLinks_Jobs_JobId`) violations if a job was pruned or cancelled.
 - **Parallel Crawl Bounding**: Uses `SemaphoreSlim(5)` to bound concurrent HTTP requests, avoiding thread pool starvation or rate-limit bans.
-- **Immediate In-Memory Deduplication**: Performs an $O(1)$ check against `ConcurrentDictionary<uint, string>` BEFORE issuing HTTP requests, preventing duplicate in-flight requests.
+- **Immediate In-Memory Deduplication**: Performs an $O(1)$ check against a per-job `HashSet<uint>` BEFORE issuing HTTP requests, preventing duplicate in-flight requests. It is per job on purpose: a cache shared across jobs made a second crawl of the same site skip all of its links.
 
 ---
 
 ## 4. Security & File System Edge Cases
 - **XSS Prevention in Page Preview**: Extracts visible text from HTML using `HtmlAgilityPack` (removing `<script>`, `<style>`, and comment nodes) and renders plain text in `<pre>` with safe React keyword highlighting (`<mark>`), avoiding raw HTML `dangerouslySetInnerHTML` XSS vulnerabilities.
-- **Safe Disk Directory Replication**: Replicates URL folder structure on disk (`./storage/{domain}/path/to/file.html`), sanitizing invalid path characters and preventing directory traversal attacks.
+- **Safe Disk Directory Replication**: Replicates the URL folder structure on disk (`storage/{domain}/path/to/file.txt`), sanitising invalid path characters, keeping query strings apart with a hash suffix, and refusing any read, write or delete that resolves outside the storage root.
 
 ---
 
 ## 5. Graceful Shutdown & Pause/Resume Edge Cases
-- **CTRL+C & Worker Shutdown**: Uses per-job `CancellationTokenSource` linked to `IHostApplicationLifetime` so `CTRL+C` or cancellation requests gracefully stop worker loops without overwriting `Canceled` status with `Completed`.
-- **Crawl Pause & Resume**: Pauses queue execution gracefully in memory without destroying deduplication state or progress counters.
+- **Cancel & Worker Shutdown**: each job has a `CancellationTokenSource` linked to the message consumer's token, so a cancel request or host shutdown stops fetches, writes and publishes, never publishes `Completed` for a canceled job, and is not reported to the broker as a fault (no retry that would restart the job).
+- **Crawl Pause & Resume**: pauses queue execution in memory between batches without destroying the dedupe set or counters. Pausing, resuming or canceling a job in a final state is not yet blocked.
 
 ---
 
 ## 6. Infrastructure Outage Reporting
-- **Database / Queue Outage Handling**: `GET /health` returns structured JSON status (`Healthy` / `Degraded`) for MySQL and RabbitMQ connections, preventing unhandled runtime exceptions.
+- **Database / Queue Outage Handling**: API `GET /health` reports the MySQL state and the worker `GET /health` reports the MassTransit bus state. The API's broker field is still a static string.
+- **Worker Startup Without a Database**: a failed database initialisation is logged instead of silently swallowed.
+
+---
+
+## 7. Page Outcomes, Limits & Storage Failures
+- **What is a crawled page**: only a 2xx HTML response that was stored counts (`PageCrawledEvent.IsSuccess`). 4xx (never retried), 5xx after retries, network errors and timeouts, non-HTML content types (PDF, images) and pages whose file could not be saved are recorded on the page row but excluded from `TotalPagesCrawled`, bytes and the page limit.
+- **Max-pages overrun**: a slot is reserved atomically before a page is stored and released if the write fails, so concurrent tasks cannot exceed `MaxPagesLimit`.
+- **Storage write failure**: the write is retried once; if it still fails the page is reported as failed and its slot is released, instead of silently losing the file.
+- **Unexpected job error**: publishes `Failed` with a `FailureReason` (also written to `JobStatusTransitions`) so the job does not stay `Running`. An unexpected error on a single page publishes a failed-page event for that page instead of making it vanish.
+- **Failed re-crawl of a stored page**: the API keeps the previously stored SimHash, path and size when a later event for the same page is a failure.
+- **Same site crawled twice**: dedupe is per job, so both jobs fetch fully (the page rows are shared).

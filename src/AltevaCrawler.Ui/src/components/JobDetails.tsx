@@ -37,7 +37,7 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
     loadMetrics();
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl('/hubs/crawlProgress')
+      .withUrl('hubs/crawlProgress')
       .withAutomaticReconnect()
       .build();
 

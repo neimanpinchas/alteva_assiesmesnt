@@ -18,6 +18,11 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        // Attributes cannot express a generated-column expression, so this one stays in fluent configuration.
+        modelBuilder.Entity<Page>()
+            .Property(p => p.UrlCrc32)
+            .HasComputedColumnSql(SchemaUpgrader.UrlCrc32Expression, stored: true);
+
         modelBuilder.Entity<JobStatusTransition>()
             .HasOne(e => e.Job)
             .WithMany(j => j.StatusTransitions)
