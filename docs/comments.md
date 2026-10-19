@@ -57,3 +57,4 @@ b. make a file TRICKS.md and mention all tricks such as simhash, url hash index,
 what will hapen if the db is down or the mq can we make it reprt nicely?
 # section 4
 please make a good gitignore file, and commit to github
+on delete list doesnt update

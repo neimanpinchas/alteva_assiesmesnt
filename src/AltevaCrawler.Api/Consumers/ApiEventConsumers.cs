@@ -27,6 +27,14 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
     public async Task Consume(ConsumeContext<PageCrawledEvent> context)
     {
         var msg = context.Message;
+
+        // Check if job exists in database before processing
+        var dbJob = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == msg.JobId);
+        if (dbJob == null)
+        {
+            return; // Skip if job was deleted/pruned
+        }
+
         uint domainHash = UrlNormalizer.ComputeDomainHash(UrlNormalizer.ExtractDomain(msg.Url));
 
         var page = await _dbContext.Pages.FirstOrDefaultAsync(p => p.UrlCrc32 == msg.UrlCrc32 && p.NormalizedUrl == msg.Url);
@@ -54,19 +62,22 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
             page.CrawledAt = msg.CrawledAt;
         }
 
-        var dbJob = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == msg.JobId);
-        if (dbJob != null)
+        dbJob.TotalPagesCrawled++;
+        dbJob.TotalBytesDownloaded += msg.ByteSize;
+        if (dbJob.Status == JobStatus.Pending)
         {
-            dbJob.TotalPagesCrawled++;
-            dbJob.TotalBytesDownloaded += msg.ByteSize;
-            if (dbJob.Status == JobStatus.Pending)
-            {
-                dbJob.Status = JobStatus.Running;
-                dbJob.StartedAt = DateTime.UtcNow;
-            }
+            dbJob.Status = JobStatus.Running;
+            dbJob.StartedAt = DateTime.UtcNow;
         }
 
-        await _dbContext.SaveChangesAsync();
+        try
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // Safely ignore foreign key race conditions
+        }
 
         await _hubContext.Clients.Group($"job-{msg.JobId}")
             .SendAsync("PageCrawled", msg);
@@ -87,6 +98,14 @@ public class ApiLinkDiscoveredConsumer : IConsumer<LinkDiscoveredEvent>
     public async Task Consume(ConsumeContext<LinkDiscoveredEvent> context)
     {
         var msg = context.Message;
+
+        // Check if job exists before creating foreign key link
+        bool jobExists = await _dbContext.Jobs.AnyAsync(j => j.Id == msg.JobId);
+        if (!jobExists)
+        {
+            return; // Skip if job was deleted/pruned
+        }
+
         uint sourceCrc = UrlNormalizer.ComputeCrc32(msg.SourceUrl);
 
         var sourcePage = await _dbContext.Pages.FirstOrDefaultAsync(p => p.UrlCrc32 == sourceCrc && p.NormalizedUrl == msg.SourceUrl);
@@ -105,7 +124,11 @@ public class ApiLinkDiscoveredConsumer : IConsumer<LinkDiscoveredEvent>
                 IsCrawled = false
             };
             _dbContext.Pages.Add(targetPage);
-            await _dbContext.SaveChangesAsync();
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (DbUpdateException) { }
         }
 
         if (sourcePage != null)
@@ -122,7 +145,11 @@ public class ApiLinkDiscoveredConsumer : IConsumer<LinkDiscoveredEvent>
                     TargetPageId = targetPage.Id,
                     CreatedAt = DateTime.UtcNow
                 });
-                await _dbContext.SaveChangesAsync();
+                try
+                {
+                    await _dbContext.SaveChangesAsync();
+                }
+                catch (DbUpdateException) { }
             }
         }
 
@@ -163,7 +190,11 @@ public class ApiJobProgressConsumer : IConsumer<JobProgressUpdatedEvent>
             }
             job.TotalPagesCrawled = msg.CrawledPagesCount;
             job.TotalBytesDownloaded = msg.TotalBytesDownloaded;
-            await _dbContext.SaveChangesAsync();
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (DbUpdateException) { }
         }
 
         await _hubContext.Clients.Group($"job-{msg.JobId}")
