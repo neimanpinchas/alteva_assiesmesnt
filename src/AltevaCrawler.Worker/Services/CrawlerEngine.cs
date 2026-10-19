@@ -22,9 +22,6 @@ public class CrawlerEngine
     private readonly ILogger<CrawlerEngine> _logger;
     private readonly string _storageBasePath;
 
-    // In-memory URL cache using UrlCrc32
-    private readonly ConcurrentDictionary<uint, string> _inMemoryUrlCache = new();
-
     // Pause state tracking per job
     private readonly ConcurrentDictionary<string, bool> _pausedJobs = new();
 
@@ -94,11 +91,16 @@ public class CrawlerEngine
                 return;
             }
 
+            var jobUrlCache = new HashSet<uint>();
+
             uint startCrc = UrlNormalizer.ComputeCrc32(normalizedStartUrl);
 
             var queue = new ConcurrentQueue<(string Url, uint UrlCrc, int Depth, string? ParentUrl)>();
             queue.Enqueue((normalizedStartUrl, startCrc, 0, null));
-            _inMemoryUrlCache.TryAdd(startCrc, normalizedStartUrl);
+            lock (jobUrlCache)
+            {
+                jobUrlCache.Add(startCrc);
+            }
 
             int crawledCount = 0;
             long totalBytes = 0;
@@ -186,15 +188,12 @@ public class CrawlerEngine
                             Interlocked.Add(ref totalBytes, byteSize);
                             Interlocked.Increment(ref crawledCount);
 
-                            // Save HTML file replicating website URL path structure
+                            // Save file using relative storage path builder
                             string domain = UrlNormalizer.ExtractDomain(currentUrl);
                             Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri);
-                            string pathSegment = uri != null ? uri.AbsolutePath.Trim('/') : "index";
-                            if (string.IsNullOrEmpty(pathSegment)) pathSegment = "index";
-                            pathSegment = pathSegment.Replace('/', Path.DirectorySeparatorChar);
+                            string relativeStoragePath = uri != null ? StoragePathBuilder.ToRelativePath(uri) : $"{domain}/index.txt";
 
-                            string domainFolder = Path.Combine(_storageBasePath, domain);
-                            string fullFilePath = Path.Combine(domainFolder, pathSegment + ".html");
+                            string fullFilePath = Path.Combine(_storageBasePath, relativeStoragePath);
                             string? parentDirectory = Path.GetDirectoryName(fullFilePath);
                             if (parentDirectory != null) Directory.CreateDirectory(parentDirectory);
 
@@ -244,7 +243,7 @@ public class CrawlerEngine
                                 UrlCrc32 = currentCrc,
                                 SimHash = simHash,
                                 ContentHash = contentHash,
-                                StoragePath = fullFilePath,
+                                StoragePath = relativeStoragePath,
                                 StatusCode = (int)response.StatusCode,
                                 ByteSize = byteSize,
                                 OutgoingLinksCount = outgoingLinks.Count,
@@ -266,7 +265,13 @@ public class CrawlerEngine
                                     }, jobToken);
 
                                     // Fast in-memory deduplication check BEFORE queueing
-                                    if (_inMemoryUrlCache.TryAdd(linkCrc, linkUrl))
+                                    bool isNew;
+                                    lock (jobUrlCache)
+                                    {
+                                        isNew = jobUrlCache.Add(linkCrc);
+                                    }
+
+                                    if (isNew)
                                     {
                                         queue.Enqueue((linkUrl, linkCrc, currentDepth + 1, currentUrl));
                                     }
@@ -293,12 +298,18 @@ public class CrawlerEngine
                 return;
             }
 
+            int totalDiscovered;
+            lock (jobUrlCache)
+            {
+                totalDiscovered = jobUrlCache.Count;
+            }
+
             await _publishEndpoint.Publish(new JobProgressUpdatedEvent
             {
                 JobId = jobId,
                 Status = "Completed",
                 CrawledPagesCount = crawledCount,
-                DiscoveredPagesCount = _inMemoryUrlCache.Count,
+                DiscoveredPagesCount = totalDiscovered,
                 TotalBytesDownloaded = totalBytes,
                 UpdatedAt = DateTime.UtcNow
             }, ct);

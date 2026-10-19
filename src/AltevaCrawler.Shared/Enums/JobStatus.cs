@@ -6,7 +6,8 @@ public enum JobStatus
     Running = 'R',
     Completed = 'C',
     Failed = 'F',
-    Canceled = 'X'
+    Canceled = 'X',
+    Paused = 'S'
 }
 
 public static class JobStatusExtensions
@@ -20,6 +21,7 @@ public static class JobStatusExtensions
         'C' => JobStatus.Completed,
         'F' => JobStatus.Failed,
         'X' => JobStatus.Canceled,
+        'S' => JobStatus.Paused,
         _ => throw new ArgumentException($"Unknown JobStatus character: '{statusChar}'", nameof(statusChar))
     };
 

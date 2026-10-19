@@ -138,21 +138,35 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
     }
   };
 
+  const renderHighlightedText = (text: string, query: string): React.ReactNode => {
+    if (!query || !query.trim()) {
+      return text;
+    }
+
+    const q = query.trim();
+    const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+    const parts = text.split(regex);
+
+    return parts.map((part, index) => {
+      if (part.toLowerCase() === q.toLowerCase()) {
+        return (
+          <mark key={index} className="bg-yellow-400 text-black px-1 rounded">
+            {part}
+          </mark>
+        );
+      }
+      return part;
+    });
+  };
+
   const openPagePreview = async (pageId: number, url: string) => {
     setSelectedPageUrl(url);
     try {
       const res = await getPageContent(jobId, pageId);
-      let html = res.html;
-
-      // Highlight matching query keywords in text
-      if (searchQuery.trim()) {
-        const regex = new RegExp(`(${searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-        html = html.replace(regex, '<mark class="bg-yellow-400 text-black px-1 rounded">$1</mark>');
-      }
-
-      setSelectedPageContent(html);
+      setSelectedPageContent(res.textContent);
     } catch (err) {
-      setSelectedPageContent('Page content HTML file not found or not crawled yet.');
+      setSelectedPageContent('Page content file not found or not crawled yet.');
     }
   };
 
@@ -500,10 +514,11 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
               Close Preview
             </button>
           </div>
-          <div
-            className="p-4 bg-slate-900 rounded-lg text-xs font-mono text-slate-300 max-h-72 overflow-auto whitespace-pre-wrap border border-slate-700"
-            dangerouslySetInnerHTML={{ __html: selectedPageContent || 'Loading content...' }}
-          />
+          <pre className="p-4 bg-slate-900 rounded-lg text-xs font-mono text-slate-300 max-h-72 overflow-auto whitespace-pre-wrap border border-slate-700">
+            {selectedPageContent
+              ? renderHighlightedText(selectedPageContent, searchQuery)
+              : 'Loading content...'}
+          </pre>
         </div>
       )}
     </div>

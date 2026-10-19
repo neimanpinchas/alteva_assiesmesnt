@@ -1,11 +1,12 @@
 FROM node:20-alpine AS build
 WORKDIR /app
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 COPY src/AltevaCrawler.Ui/package*.json ./
 RUN npm install
 COPY src/AltevaCrawler.Ui/ ./
 RUN npm run build
 
-FROM nginx:alpine
+FROM docker.io/library/nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY src/AltevaCrawler.Ui/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

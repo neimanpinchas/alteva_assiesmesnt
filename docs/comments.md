@@ -61,3 +61,8 @@ on delete list doesnt update
 # section 5
 a. once completed it shoudl no longer hsow a forecast
 b. link tree view stopped showing tree, siunds like links are broken
+# seciton 6
+once done the chart should show the history of the crawl evolvement, not just 0 and current, it can also show how much time, and what speed it used
+change the file store to an interface and implemnt a mock s3 impl for reference but not to use
+add a page explaining the benefits of using haxe ot share common logic and the interfaces used ot enforce contracts, mention that openapi specs, and nwag are more common i chose that path
+add a openapi.yaml and open api style interactive docs, maybe use nswag style for dtos, and haxe for shared proceedures

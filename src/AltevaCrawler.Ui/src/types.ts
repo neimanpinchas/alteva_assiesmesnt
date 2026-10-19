@@ -65,7 +65,7 @@ export interface PageSearchResultDto {
 export interface PageContentDto {
   pageId: number;
   url: string;
-  html: string;
+  textContent: string;
 }
 
 export function getJobStatusBadgeClass(status: string): string {

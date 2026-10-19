@@ -41,6 +41,8 @@ services:
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__Username: "guest"
       RabbitMQ__Password: "guest"
+    volumes:
+      - crawler_storage:/app/storage
     depends_on:
       mysql:
         condition: service_healthy

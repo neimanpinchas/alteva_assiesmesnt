@@ -20,8 +20,11 @@ public class Crypto : global::haxe.lang.HxObject {
 		global::Date _this = new global::Date(((global::System.DateTime) (global::System.DateTime.Now) ));
 		int timestamp = ((int) (global::System.Math.Floor(((double) (( ((double) (((long) (( ((long) (global::System.TimeZone.CurrentTimeZone.ToUniversalTime(((global::System.DateTime) (_this.date) )).Ticks) ) - ((long) (global::Date.epochTicks) ) )) )) ) / ((double) (global::System.TimeSpan.TicksPerMillisecond) ) )) ))) );
 		string payload = global::haxe.lang.Runtime.concat(global::haxe.lang.Runtime.concat(sessionId, ":"), global::haxe.lang.Runtime.toString(timestamp));
-		int signature = global::UrlUtils.crc32(global::haxe.lang.Runtime.concat(payload, secretKey));
-		return global::haxe.lang.Runtime.concat(global::haxe.lang.Runtime.concat(payload, "."), global::StringTools.hex(signature, default(global::haxe.lang.Null<int>)));
+		global::haxe.crypto.Hmac hmac = new global::haxe.crypto.Hmac(((global::haxe.crypto.HashMethod) (global::haxe.crypto.HashMethod.SHA256) ));
+		global::haxe.io.Bytes secretBytes = global::haxe.io.Bytes.ofString(secretKey, null);
+		global::haxe.io.Bytes payloadBytes = global::haxe.io.Bytes.ofString(payload, null);
+		string signature = hmac.make(secretBytes, payloadBytes).toHex();
+		return global::haxe.lang.Runtime.concat(global::haxe.lang.Runtime.concat(payload, "."), signature);
 	}
 	
 	
@@ -38,8 +41,11 @@ public class Crypto : global::haxe.lang.HxObject {
 			
 			string payload = global::haxe.lang.StringExt.substring(token, 0, new global::haxe.lang.Null<int>(lastDot, true));
 			string sigHex = global::haxe.lang.StringExt.substring(token, ( lastDot + 1 ), default(global::haxe.lang.Null<int>));
-			string expectedSig = global::StringTools.hex(global::UrlUtils.crc32(global::haxe.lang.Runtime.concat(payload, secretKey)), default(global::haxe.lang.Null<int>));
-			return ( sigHex.ToUpperInvariant() == expectedSig.ToUpperInvariant() );
+			global::haxe.crypto.Hmac hmac = new global::haxe.crypto.Hmac(((global::haxe.crypto.HashMethod) (global::haxe.crypto.HashMethod.SHA256) ));
+			global::haxe.io.Bytes secretBytes = global::haxe.io.Bytes.ofString(secretKey, null);
+			global::haxe.io.Bytes payloadBytes = global::haxe.io.Bytes.ofString(payload, null);
+			string expectedSig = hmac.make(secretBytes, payloadBytes).toHex();
+			return ( sigHex.ToLowerInvariant() == expectedSig.ToLowerInvariant() );
 		}
 	}
 	

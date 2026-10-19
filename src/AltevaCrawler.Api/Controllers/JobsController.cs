@@ -43,7 +43,7 @@ public class JobsController : ControllerBase
             return BadRequest(new { error = "Invalid URL format." });
         }
 
-        string jobId = Guid.CreateVersion7().ToString();
+        string jobId = Guid.NewGuid().ToString();
         int maxDepth = request.MaxDepth ?? 2;
         int maxPagesLimit = request.MaxPagesLimit ?? 200;
 
@@ -373,19 +373,29 @@ public class JobsController : ControllerBase
     public async Task<IActionResult> GetPageContent(string id, long pageId)
     {
         var page = await _dbContext.Pages.FirstOrDefaultAsync(p => p.Id == pageId);
-        if (page == null || string.IsNullOrEmpty(page.StoragePath) || !System.IO.File.Exists(page.StoragePath))
+        if (page == null || string.IsNullOrEmpty(page.StoragePath))
         {
             return NotFound(new { error = "Page content file not found on disk." });
         }
 
-        string html = await System.IO.File.ReadAllTextAsync(page.StoragePath);
-        string text = ExtractPlainText(html);
+        string storageRoot = Path.Combine(Directory.GetCurrentDirectory(), "storage");
+        string fullPath = Path.IsPathRooted(page.StoragePath)
+            ? page.StoragePath
+            : Path.Combine(storageRoot, page.StoragePath);
+
+        if (!StoragePathBuilder.IsUnderRoot(fullPath, storageRoot) || !System.IO.File.Exists(fullPath))
+        {
+            return NotFound(new { error = "Page content file not found on disk." });
+        }
+
+        string rawContent = await System.IO.File.ReadAllTextAsync(fullPath);
+        string text = ExtractPlainText(rawContent);
 
         return Ok(new PageContentDto
         {
             PageId = page.Id,
             Url = page.Url,
-            Html = text
+            TextContent = text
         });
     }
 
@@ -406,8 +416,7 @@ public class JobsController : ControllerBase
         }
 
         string innerText = doc.DocumentNode.InnerText;
-        string decodedText = System.Net.WebUtility.HtmlDecode(innerText);
-        return System.Net.WebUtility.HtmlEncode(decodedText);
+        return System.Net.WebUtility.HtmlDecode(innerText);
     }
 
     [HttpGet]
@@ -470,7 +479,16 @@ public class JobsController : ControllerBase
         var job = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == id);
         if (job == null) return NotFound();
 
-        job.Status = JobStatus.Pending;
+        char oldStatus = job.Status.ToChar();
+        job.Status = JobStatus.Paused;
+        _dbContext.JobStatusTransitions.Add(new JobStatusTransition
+        {
+            JobId = id,
+            FromStatus = oldStatus,
+            ToStatus = JobStatus.Paused.ToChar(),
+            TransitionedAt = DateTime.UtcNow,
+            Reason = "User paused job"
+        });
         await _dbContext.SaveChangesAsync();
 
         await _publishEndpoint.Publish(new PauseJobRequestedEvent
@@ -497,7 +515,16 @@ public class JobsController : ControllerBase
         var job = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == id);
         if (job == null) return NotFound();
 
+        char oldStatus = job.Status.ToChar();
         job.Status = JobStatus.Running;
+        _dbContext.JobStatusTransitions.Add(new JobStatusTransition
+        {
+            JobId = id,
+            FromStatus = oldStatus,
+            ToStatus = JobStatus.Running.ToChar(),
+            TransitionedAt = DateTime.UtcNow,
+            Reason = "User resumed job"
+        });
         await _dbContext.SaveChangesAsync();
 
         await _publishEndpoint.Publish(new ResumeJobRequestedEvent

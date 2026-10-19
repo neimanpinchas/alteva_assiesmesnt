@@ -301,4 +301,44 @@ public class UnitTests
     }
 
     #endregion
+
+    #region StoragePathBuilder Tests (N8)
+
+    [Fact]
+    public void StoragePathBuilder_ToRelativePath_ConvertsUriToRelativePath()
+    {
+        var uri = new Uri("https://example.com/about/team?lang=en&v=2");
+        string relativePath = StoragePathBuilder.ToRelativePath(uri);
+
+        Assert.StartsWith("example.com/about/team", relativePath);
+        Assert.EndsWith(".txt", relativePath);
+        Assert.DoesNotContain("?", relativePath);
+    }
+
+    [Fact]
+    public void StoragePathBuilder_ToRelativePath_PreventsQueryStringCollisions()
+    {
+        var uri1 = new Uri("https://example.com/search?q=cat");
+        var uri2 = new Uri("https://example.com/search?q=dog");
+
+        string path1 = StoragePathBuilder.ToRelativePath(uri1);
+        string path2 = StoragePathBuilder.ToRelativePath(uri2);
+
+        Assert.NotEqual(path1, path2);
+        Assert.StartsWith("example.com/search", path1);
+        Assert.StartsWith("example.com/search", path2);
+    }
+
+    [Fact]
+    public void StoragePathBuilder_IsUnderRoot_ValidatesPathSafety()
+    {
+        string rootPath = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "storage");
+        string validPath = System.IO.Path.Combine(rootPath, "example.com", "page.txt");
+        string pathTraversal = System.IO.Path.Combine(rootPath, "..", "..", "etc", "passwd");
+
+        Assert.True(StoragePathBuilder.IsUnderRoot(validPath, rootPath));
+        Assert.False(StoragePathBuilder.IsUnderRoot(pathTraversal, rootPath));
+    }
+
+    #endregion
 }

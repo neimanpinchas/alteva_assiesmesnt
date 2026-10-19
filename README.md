@@ -50,6 +50,24 @@ flowchart TD
 
 ---
 
+## 🗄️ Page Content Storage (File Store) — Requirement & Trade-offs
+
+Raw page content is **not stored in MySQL**. The worker writes each fetched page to a file store, mirroring the site's folder structure (one root folder per domain), and the database keeps only metadata: `StoragePath`, `ContentHash` (to cross-verify the file), `ByteSize` and `SimHash`.
+
+**Why:** page bodies are large and mostly read-once. Keeping them out of `Pages` avoids table and buffer-pool bloat, keeps backups and replication small, and keeps index scans fast.
+
+**Trade-offs:**
+- The database is no longer self-contained. A restore needs the DB **and** the file store, and the two can drift (a row without a file, or an orphan file). `ContentHash` lets us detect this, and delete/prune must remove both.
+- Two services need the files: the **worker writes** them and the **API reads** them (page preview, text extraction). Today this only works if both see the same directory.
+
+**Requirement (deployment):**
+- The worker and the API **must share the same storage root** (the same machine, or the same mounted volume). `docker-compose.yml` must mount one volume on both services; the API currently has none, so preview does not work in compose until that is added.
+- The storage root comes from configuration (`Storage:RootPath`), and the database stores a **path relative to that root**, never an absolute worker path. The API must refuse to read any path that resolves outside the root.
+
+**Known limitation / next step:** a shared local volume does not scale to multiple machines. For multi-host deployments we will move the store behind an interface (e.g. `IPageStore`: `Save`, `Open`, `Delete`) and use object storage such as **S3** (or Azure Blob). Only `StoragePath` semantics (becoming an object key) and the store implementation change; the event and DB schema stay the same.
+
+---
+
 ## 🚀 How to Run Locally
 
 ### Option 1: Local Development Mode

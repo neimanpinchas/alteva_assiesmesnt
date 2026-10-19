@@ -60,11 +60,26 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
         }
         else
         {
-            page.SimHash = msg.SimHash;
-            page.ContentHash = msg.ContentHash;
-            page.StoragePath = msg.StoragePath;
+            bool isFailure = msg.StatusCode >= 400 || msg.ByteSize == 0;
+
+            if (!isFailure || page.SimHash == 0)
+            {
+                page.SimHash = msg.SimHash;
+            }
+            if (!isFailure || string.IsNullOrEmpty(page.ContentHash))
+            {
+                page.ContentHash = msg.ContentHash;
+            }
+            if (!isFailure || string.IsNullOrEmpty(page.StoragePath))
+            {
+                page.StoragePath = msg.StoragePath;
+            }
+            if (!isFailure || page.ByteSize == 0)
+            {
+                page.ByteSize = msg.ByteSize;
+            }
+
             page.StatusCode = msg.StatusCode;
-            page.ByteSize = msg.ByteSize;
             page.OutgoingLinksCount = msg.OutgoingLinksCount;
             page.IsCrawled = true;
             page.CrawledAt = msg.CrawledAt;
@@ -194,7 +209,7 @@ public class ApiJobProgressConsumer : IConsumer<JobProgressUpdatedEvent>
             }
             else if (msg.Status == "Paused")
             {
-                job.Status = JobStatus.Pending;
+                job.Status = JobStatus.Paused;
             }
             job.TotalPagesCrawled = msg.CrawledPagesCount;
             job.TotalBytesDownloaded = msg.TotalBytesDownloaded;

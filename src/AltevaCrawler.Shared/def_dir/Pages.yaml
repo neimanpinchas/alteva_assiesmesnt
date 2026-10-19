@@ -10,6 +10,7 @@ C:
   - SimHash##*
   - ContentHash{64}
   - StoragePath{512}
+  - ByteSize##*
   - StatusCode#*
   - OutgoingLinksCount#*
   - IsCrawled!*

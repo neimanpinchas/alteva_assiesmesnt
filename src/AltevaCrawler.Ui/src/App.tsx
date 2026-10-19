@@ -12,7 +12,7 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'start' | 'details' | 'history'>('start');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [globalResults, setGlobalResults] = useState<PageSearchResultDto[] | null>(null);
-  const [selectedGlobalPage, setSelectedGlobalPage] = useState<{ url: string; html: string } | null>(null);
+  const [selectedGlobalPage, setSelectedGlobalPage] = useState<{ url: string; textContent: string } | null>(null);
 
   // Hash-based client routing so page reloads preserve active job
   useEffect(() => {
@@ -48,9 +48,9 @@ export const App: React.FC = () => {
   const openGlobalPagePreview = async (res: PageSearchResultDto) => {
     try {
       const content = await getPageContent(res.jobId || 'global', res.id);
-      setSelectedGlobalPage({ url: res.url, html: content.html });
+      setSelectedGlobalPage({ url: res.url, textContent: content.textContent });
     } catch (err) {
-      setSelectedGlobalPage({ url: res.url, html: 'Content not found on disk.' });
+      setSelectedGlobalPage({ url: res.url, textContent: 'Content not found on disk.' });
     }
   };
 
@@ -113,10 +113,9 @@ export const App: React.FC = () => {
                   Close Preview
                 </button>
               </div>
-              <div
-                className="p-4 bg-slate-900 rounded-lg text-xs font-mono text-slate-300 max-h-64 overflow-auto whitespace-pre-wrap border border-slate-700"
-                dangerouslySetInnerHTML={{ __html: selectedGlobalPage.html }}
-              />
+              <pre className="p-4 bg-slate-900 rounded-lg text-xs font-mono text-slate-300 max-h-64 overflow-auto whitespace-pre-wrap border border-slate-700">
+                {selectedGlobalPage.textContent}
+              </pre>
             </div>
           )}
 

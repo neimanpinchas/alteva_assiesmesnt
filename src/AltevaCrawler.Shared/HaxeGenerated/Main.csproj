@@ -69,17 +69,25 @@
 	
     <Compile Include="src\haxe\exceptions\PosException.cs"/>
 	
+    <Compile Include="src\haxe\io\Encoding.cs"/>
+	
+    <Compile Include="src\haxe\crypto\Hmac.cs"/>
+	
+    <Compile Include="src\haxe\crypto\Md5.cs"/>
+	
     <Compile Include="src\haxe\Exception.cs"/>
 	
     <Compile Include="src\Type.cs"/>
 	
     <Compile Include="src\Date.cs"/>
 	
-    <Compile Include="src\StringTools.cs"/>
+    <Compile Include="src\haxe\crypto\Sha256.cs"/>
 	
     <Compile Include="src\haxe\iterators\ArrayIterator.cs"/>
 	
     <Compile Include="src\Reflect.cs"/>
+	
+    <Compile Include="src\haxe\io\Bytes.cs"/>
 	
     <Compile Include="src\haxe\exceptions\NotImplementedException.cs"/>
 	
@@ -102,6 +110,12 @@
     <Compile Include="src\cs\internal\FieldLookup.cs"/>
 	
     <Compile Include="src\Main.cs"/>
+	
+    <Compile Include="src\haxe\crypto\Sha1.cs"/>
+	
+    <Compile Include="src\haxe\io\BytesBuffer.cs"/>
+	
+    <Compile Include="src\StringBuf.cs"/>
 	
   </ItemGroup>
   

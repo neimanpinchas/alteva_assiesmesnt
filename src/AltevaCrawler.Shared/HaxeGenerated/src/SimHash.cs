@@ -16,6 +16,28 @@ public class SimHash : global::haxe.lang.HxObject {
 	}
 	
 	
+	public static int hammingDistance64(long h1, long h2) {
+		unchecked {
+			long x = ((long) (( ((long) (h1) ) ^ ((long) (h2) ) )) );
+			int count = 0;
+			{
+				int _g = 0;
+				while (( _g < 64 )) {
+					int i = _g++;
+					long bit = ( (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (1) ) & 0xffffffffL ) )) )) << i );
+					if (( (((long) (( ((long) (x) ) & ((long) (bit) ) )) )) != (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) )) )) {
+						 ++ count;
+					}
+					
+				}
+				
+			}
+			
+			return count;
+		}
+	}
+	
+	
 	public static int hammingDistance(double h1, double h2) {
 		unchecked {
 			int i1 = ((int) (h1) );
@@ -28,6 +50,75 @@ public class SimHash : global::haxe.lang.HxObject {
 			}
 			
 			return count;
+		}
+	}
+	
+	
+	public static long computeSimHash64(string text) {
+		unchecked {
+			if (( ( text == null ) || ( text.Length == 0 ) )) {
+				return ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+			}
+			
+			global::Array<string> words = global::haxe.lang.StringExt.split(text, " ");
+			global::Array<int> _g = new global::Array<int>(new int[]{});
+			{
+				int _g1 = 0;
+				while (( _g1 < 64 )) {
+					int i = _g1++;
+					_g.push(0);
+				}
+				
+			}
+			
+			global::Array<int> v = _g;
+			{
+				int _g2 = 0;
+				while (( _g2 < words.length )) {
+					string w = words[_g2];
+					 ++ _g2;
+					if (( w.Length == 0 )) {
+						continue;
+					}
+					
+					global::haxe.io.Bytes shaBytes = global::haxe.crypto.Sha256.make(global::haxe.io.Bytes.ofString(w, null));
+					int hHigh = ( ( ( ( ((int) (shaBytes.b[0]) ) << 24 ) | ( ((int) (shaBytes.b[1]) ) << 16 ) ) | ( ((int) (shaBytes.b[2]) ) << 8 ) ) | ((int) (shaBytes.b[3]) ) );
+					int hLow = ( ( ( ( ((int) (shaBytes.b[4]) ) << 24 ) | ( ((int) (shaBytes.b[5]) ) << 16 ) ) | ( ((int) (shaBytes.b[6]) ) << 8 ) ) | ((int) (shaBytes.b[7]) ) );
+					long hash = ((long) (( ( ((long) (hHigh) ) << 32 ) | ( ((long) (hLow) ) & 0xffffffffL ) )) );
+					{
+						int _g3 = 0;
+						while (( _g3 < 64 )) {
+							int i1 = _g3++;
+							long bit = ( (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (1) ) & 0xffffffffL ) )) )) << i1 );
+							if (( (((long) (( ((long) (hash) ) & ((long) (bit) ) )) )) != (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) )) )) {
+								v[i1] += 1;
+							}
+							else {
+								v[i1] -= 1;
+							}
+							
+						}
+						
+					}
+					
+				}
+				
+			}
+			
+			long fingerPrint = ((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (0) ) & 0xffffffffL ) )) );
+			{
+				int _g4 = 0;
+				while (( _g4 < 64 )) {
+					int i2 = _g4++;
+					if (( v[i2] > 0 )) {
+						fingerPrint = ( ((long) (fingerPrint) ) | ((long) (( (((long) (( ( ((long) (0) ) << 32 ) | ( ((long) (1) ) & 0xffffffffL ) )) )) << i2 )) ) );
+					}
+					
+				}
+				
+			}
+			
+			return fingerPrint;
 		}
 	}
 	

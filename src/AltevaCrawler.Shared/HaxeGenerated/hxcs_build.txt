@@ -161,6 +161,11 @@ M cs.system.collections.Hashtable
 M cs.system.runtime.interopservices.CallingConvention
 M cs.system.text.Encoding
 M cs.system.MidpointRounding
+M haxe.io.Encoding
+E haxe.io.Encoding
+C haxe.io.Encoding
+C haxe.io.Encoding_UTF8
+C haxe.io.Encoding_RawNative
 M cs.system.reflection.BindingFlags
 M cs.system.reflection.ParameterAttributes
 M System.IO.Directory
@@ -176,9 +181,18 @@ M cs.StdTypes
 M System.Reflection.ManifestResourceInfo
 M System.Delegate
 M cs.system.globalization.UnicodeCategory
+M haxe.crypto.Hmac
+E haxe.crypto.HashMethod
+C haxe.crypto.HashMethod
+C haxe.crypto.HashMethod_MD5
+C haxe.crypto.HashMethod_SHA1
+C haxe.crypto.HashMethod_SHA256
+C haxe.crypto.Hmac
 M System.Runtime.InteropServices._LocalBuilder
 M System.Collections.IList
 M System.Threading.ExecutionContext
+M haxe.crypto.Md5
+C haxe.crypto.Md5
 M System.ICloneable
 M cs.system.Guid
 M System.Runtime.Remoting.IObjectHandle
@@ -255,10 +269,10 @@ M System.Diagnostics.ProcessStartInfo
 M cs.system.runtime.interopservices.CharSet
 M cs.system.threading.ThreadStart
 M System.Security.Policy.CodeGroup
-M StringTools
-C StringTools
 M cs.system.collections.ArrayList
 M System.Text.DecoderFallback
+M haxe.crypto.Sha256
+C haxe.crypto.Sha256
 M System.Text.RegularExpressions.Group
 M cs.system.security.accesscontrol.NativeObjectSecurity
 M haxe.Int64
@@ -293,6 +307,8 @@ M System.Reflection.Emit.MethodToken
 M cs.system.security.accesscontrol.AuditFlags
 M System.Double
 M System.IO.DirectoryInfo
+M haxe.io.Bytes
+C haxe.io.Bytes
 M System.Security.AccessControl.EventWaitHandleSecurity
 M System.Security.AccessControl.FileSystemAccessRule
 M cs.system.threading.ParameterizedThreadStart
@@ -506,6 +522,8 @@ M System.Security.SecurityState
 M cs.system.DateTimeKind
 M Main
 C Main
+M haxe.crypto.Sha1
+C haxe.crypto.Sha1
 M cs.system.CrossAppDomainDelegate
 M System.Collections.IEqualityComparer
 M System.Globalization.CultureInfo
@@ -525,6 +543,8 @@ M cs.system.globalization.NumberStyles
 M System.Runtime.InteropServices._FieldBuilder
 M cs.system.configuration.assemblies.AssemblyVersionCompatibility
 M cs.system.AppDomainInitializer
+M haxe.io.BytesBuffer
+C haxe.io.BytesBuffer
 M System.Decimal
 M cs.system.Console
 M cs.system.security.SecurityElement
@@ -575,6 +595,8 @@ M System.Int64
 M System.OperatingSystem
 M System.Runtime.Remoting.IChannelInfo
 M haxe.CallStack
+M StringBuf
+C StringBuf
 end modules
 begin main
 Main
