@@ -14,11 +14,15 @@ public class JobSummaryDto
     public int DiscoveredLinksCount { get; set; }
     public long TotalBytesDownloaded { get; set; }
     public double DomainLinkRatio { get; set; }
+    public double AveragePagesPerSecond { get; set; }
+    public double AverageKbPerSecond { get; set; }
+    public double TotalDurationSeconds { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string? FailureReason { get; set; }
     public List<JobStatusHistoryDto> StatusHistory { get; set; } = new();
+    public List<CrawlEvolutionPointDto> ProgressHistory { get; set; } = new();
 }
 
 public class JobStatusHistoryDto
@@ -27,4 +31,13 @@ public class JobStatusHistoryDto
     public char ToStatus { get; set; }
     public DateTime TransitionedAt { get; set; }
     public string? Reason { get; set; }
+}
+
+public class CrawlEvolutionPointDto
+{
+    public string Time { get; set; } = string.Empty;
+    public int Pages { get; set; }
+    public long Bytes { get; set; }
+    public double PagesPerSecond { get; set; }
+    public double KbPerSecond { get; set; }
 }

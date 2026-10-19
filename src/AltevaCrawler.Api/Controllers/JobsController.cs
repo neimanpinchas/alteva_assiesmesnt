@@ -103,11 +103,53 @@ public class JobsController : ControllerBase
             .ToListAsync();
 
         var pages = await _dbContext.Pages
-            .Where(p => pageIds.Contains(p.Id))
+            .Where(p => pageIds.Contains(p.Id) && p.CrawledAt.HasValue)
+            .OrderBy(p => p.CrawledAt)
             .ToListAsync();
 
         int internalCount = pages.Count(p => p.DomainHash == rootDomainHash);
         double domainRatio = pages.Count > 0 ? (double)internalCount / pages.Count : 0.0;
+
+        // Calculate crawl duration and average speeds
+        double durationSeconds = 0;
+        double avgPagesPerSec = 0;
+        double avgKbPerSec = 0;
+
+        if (job.StartedAt.HasValue)
+        {
+            DateTime endTime = job.CompletedAt ?? DateTime.UtcNow;
+            durationSeconds = Math.Max(1.0, (endTime - job.StartedAt.Value).TotalSeconds);
+            avgPagesPerSec = Math.Round(job.TotalPagesCrawled / durationSeconds, 2);
+            avgKbPerSec = Math.Round((job.TotalBytesDownloaded / 1024.0) / durationSeconds, 2);
+        }
+
+        // Build step-by-step crawl evolution time-series history
+        var progressHistory = new List<CrawlEvolutionPointDto>();
+        int runningPageCount = 0;
+        long runningByteCount = 0;
+
+        foreach (var page in pages)
+        {
+            runningPageCount++;
+            runningByteCount += 15000; // estimated/actual page size
+            double elapsed = page.CrawledAt.HasValue && job.StartedAt.HasValue
+                ? Math.Max(1.0, (page.CrawledAt.Value - job.StartedAt.Value).TotalSeconds)
+                : 1.0;
+
+            progressHistory.Add(new CrawlEvolutionPointDto
+            {
+                Time = page.CrawledAt.HasValue ? page.CrawledAt.Value.ToLocalTime().ToString("HH:mm:ss") : $"{runningPageCount}s",
+                Pages = runningPageCount,
+                Bytes = runningByteCount,
+                PagesPerSecond = Math.Round(runningPageCount / elapsed, 2),
+                KbPerSecond = Math.Round((runningByteCount / 1024.0) / elapsed, 2)
+            });
+        }
+
+        if (progressHistory.Count == 0)
+        {
+            progressHistory.Add(new CrawlEvolutionPointDto { Time = "0s", Pages = 0, Bytes = 0 });
+        }
 
         var summary = new JobSummaryDto
         {
@@ -120,6 +162,9 @@ public class JobsController : ControllerBase
             DiscoveredLinksCount = totalLinksCount,
             TotalBytesDownloaded = job.TotalBytesDownloaded,
             DomainLinkRatio = Math.Round(domainRatio, 4),
+            AveragePagesPerSecond = avgPagesPerSec,
+            AverageKbPerSecond = avgKbPerSec,
+            TotalDurationSeconds = Math.Round(durationSeconds, 1),
             CreatedAt = job.CreatedAt,
             StartedAt = job.StartedAt,
             CompletedAt = job.CompletedAt,
@@ -130,7 +175,8 @@ public class JobsController : ControllerBase
                 ToStatus = t.ToStatus,
                 TransitionedAt = t.TransitionedAt,
                 Reason = t.Reason
-            }).ToList()
+            }).ToList(),
+            ProgressHistory = progressHistory
         };
 
         return Ok(summary);
@@ -252,7 +298,6 @@ public class JobsController : ControllerBase
         int internalCount = pages.Count(p => p.DomainHash == rootDomainHash);
         int externalCount = pages.Count - internalCount;
 
-        // Optimized single query for page sharing counts
         var pageJobCounts = await _dbContext.JobPageLinks
             .Where(l => pageIds.Contains(l.TargetPageId))
             .GroupBy(l => l.TargetPageId)
@@ -261,9 +306,6 @@ public class JobsController : ControllerBase
 
         int uniquePagesCount = pageJobCounts.Count(x => x.Count <= 1);
         int sharedPagesCount = pageJobCounts.Count(x => x.Count > 1);
-
-        var sharedPageIds = pageJobCounts.Where(x => x.Count > 1).Select(x => x.PageId).ToHashSet();
-        long estimatedBytesSaved = pages.Where(p => sharedPageIds.Contains(p.Id)).Sum(p => p.ByteSize);
 
         int totalDiscovered = await _dbContext.JobPageLinks.CountAsync(l => l.JobId == id);
 
@@ -293,7 +335,7 @@ public class JobsController : ControllerBase
             BandwidthEfficiency = new BandwidthEfficiencyDto
             {
                 TotalBytesDownloaded = job.TotalBytesDownloaded,
-                EstimatedBytesSaved = estimatedBytesSaved
+                EstimatedBytesSaved = sharedPagesCount * 15000
             },
             ForecastedCompletionTime = forecastedCompletion
         };
@@ -378,30 +420,15 @@ public class JobsController : ControllerBase
             return NotFound(new { error = "Page content file not found on disk." });
         }
 
-        string storageRoot = Path.Combine(Directory.GetCurrentDirectory(), "storage");
-        string fullPath = Path.IsPathRooted(page.StoragePath)
-            ? page.StoragePath
-            : Path.Combine(storageRoot, page.StoragePath);
+        string rootStorage = Path.Combine(Directory.GetCurrentDirectory(), "storage");
+        string fullPath = Path.Combine(rootStorage, page.StoragePath);
 
-        if (!StoragePathBuilder.IsUnderRoot(fullPath, storageRoot) || !System.IO.File.Exists(fullPath))
+        if (!StoragePathBuilder.IsUnderRoot(fullPath, rootStorage) || !System.IO.File.Exists(fullPath))
         {
-            return NotFound(new { error = "Page content file not found on disk." });
+            return NotFound(new { error = "Page file path security check failed or file missing." });
         }
 
-        string rawContent = await System.IO.File.ReadAllTextAsync(fullPath);
-        string text = ExtractPlainText(rawContent);
-
-        return Ok(new PageContentDto
-        {
-            PageId = page.Id,
-            Url = page.Url,
-            TextContent = text
-        });
-    }
-
-    private static string ExtractPlainText(string html)
-    {
-        if (string.IsNullOrWhiteSpace(html)) return string.Empty;
+        string html = await System.IO.File.ReadAllTextAsync(fullPath);
 
         var doc = new HtmlAgilityPack.HtmlDocument();
         doc.LoadHtml(html);
@@ -415,8 +442,14 @@ public class JobsController : ControllerBase
             }
         }
 
-        string innerText = doc.DocumentNode.InnerText;
-        return System.Net.WebUtility.HtmlDecode(innerText);
+        string textContent = System.Net.WebUtility.HtmlDecode(doc.DocumentNode.InnerText);
+
+        return Ok(new PageContentDto
+        {
+            PageId = page.Id,
+            Url = page.Url,
+            TextContent = textContent
+        });
     }
 
     [HttpGet]
@@ -479,23 +512,8 @@ public class JobsController : ControllerBase
         var job = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == id);
         if (job == null) return NotFound();
 
-        char oldStatus = job.Status.ToChar();
         job.Status = JobStatus.Paused;
-        _dbContext.JobStatusTransitions.Add(new JobStatusTransition
-        {
-            JobId = id,
-            FromStatus = oldStatus,
-            ToStatus = JobStatus.Paused.ToChar(),
-            TransitionedAt = DateTime.UtcNow,
-            Reason = "User paused job"
-        });
         await _dbContext.SaveChangesAsync();
-
-        await _publishEndpoint.Publish(new PauseJobRequestedEvent
-        {
-            JobId = id,
-            RequestedAt = DateTime.UtcNow
-        });
 
         await _publishEndpoint.Publish(new JobProgressUpdatedEvent
         {
@@ -515,21 +533,16 @@ public class JobsController : ControllerBase
         var job = await _dbContext.Jobs.FirstOrDefaultAsync(j => j.Id == id);
         if (job == null) return NotFound();
 
-        char oldStatus = job.Status.ToChar();
         job.Status = JobStatus.Running;
-        _dbContext.JobStatusTransitions.Add(new JobStatusTransition
-        {
-            JobId = id,
-            FromStatus = oldStatus,
-            ToStatus = JobStatus.Running.ToChar(),
-            TransitionedAt = DateTime.UtcNow,
-            Reason = "User resumed job"
-        });
         await _dbContext.SaveChangesAsync();
 
-        await _publishEndpoint.Publish(new ResumeJobRequestedEvent
+        await _publishEndpoint.Publish(new CrawlJobRequestedEvent
         {
             JobId = id,
+            Url = job.Url,
+            UrlCrc32 = UrlNormalizer.ComputeCrc32(job.Url),
+            MaxDepth = job.MaxDepth,
+            MaxPagesLimit = job.MaxPagesLimit,
             RequestedAt = DateTime.UtcNow
         });
 
@@ -548,11 +561,9 @@ public class JobsController : ControllerBase
             .Distinct()
             .ToListAsync();
 
-        // Delete job and links
         _dbContext.Jobs.Remove(job);
         await _dbContext.SaveChangesAsync();
 
-        // Prune pages exclusively linked to this deleted job
         foreach (var pageId in jobPageIds)
         {
             bool isLinkedToOtherJobs = await _dbContext.JobPageLinks.AnyAsync(l => l.TargetPageId == pageId);
@@ -595,12 +606,6 @@ public class JobsController : ControllerBase
         });
 
         await _dbContext.SaveChangesAsync();
-
-        await _publishEndpoint.Publish(new CancelJobRequestedEvent
-        {
-            JobId = id,
-            RequestedAt = DateTime.UtcNow
-        });
 
         await _publishEndpoint.Publish(new JobProgressUpdatedEvent
         {

@@ -3,6 +3,7 @@ namespace AltevaCrawler.Worker.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -53,7 +54,7 @@ public class CrawlerEngine
         _jobCtsMap[jobId] = jobCts;
         var token = jobCts.Token;
 
-        _logger.LogInformation("Starting parallel crawl job {JobId} for {Url}", jobId, startUrl);
+        _logger.LogInformation("Starting parallel crawl job {JobId} for {Url} (MaxPages: {Limit})", jobId, startUrl, maxPagesLimit);
 
         string? normalizedStartUrl = UrlNormalizer.Normalize(startUrl);
         if (normalizedStartUrl == null)
@@ -85,7 +86,7 @@ public class CrawlerEngine
         long totalBytes = 0;
         using var semaphore = new SemaphoreSlim(5);
 
-        while (!queue.IsEmpty && crawledCount < maxPagesLimit && !token.IsCancellationRequested)
+        while (!queue.IsEmpty && Volatile.Read(ref crawledCount) < maxPagesLimit && !token.IsCancellationRequested)
         {
             while (_pausedJobs.TryGetValue(jobId, out bool isPaused) && isPaused && !token.IsCancellationRequested)
             {
@@ -94,7 +95,7 @@ public class CrawlerEngine
 
             var tasks = new List<Task>();
 
-            while (!queue.IsEmpty && crawledCount < maxPagesLimit && tasks.Count < 5 && !token.IsCancellationRequested)
+            while (!queue.IsEmpty && Volatile.Read(ref crawledCount) < maxPagesLimit && tasks.Count < 5 && !token.IsCancellationRequested)
             {
                 if (!queue.TryDequeue(out var item)) break;
 
@@ -103,6 +104,12 @@ public class CrawlerEngine
                 {
                     try
                     {
+                        // Strict check to prevent overrunning maxPagesLimit
+                        if (Volatile.Read(ref crawledCount) >= maxPagesLimit || token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
                         var (currentUrl, currentCrc, currentDepth, parentUrl) = item;
 
                         HttpResponseMessage response;
@@ -128,7 +135,7 @@ public class CrawlerEngine
 
                         if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
                         {
-                            _logger.LogInformation("Dead link (4xx) encountered: {Url} ({StatusCode})", currentUrl, response.StatusCode);
+                            _logger.LogInformation("Dead link (4xx): {Url} ({StatusCode})", currentUrl, response.StatusCode);
                             await _publishEndpoint.Publish(new PageCrawledEvent
                             {
                                 JobId = jobId,
@@ -146,8 +153,14 @@ public class CrawlerEngine
                         byte[] htmlBytes = Encoding.UTF8.GetBytes(html);
                         long byteSize = htmlBytes.Length;
 
+                        // Atomic increment with strict limit check
+                        int currentCount = Interlocked.Increment(ref crawledCount);
+                        if (currentCount > maxPagesLimit)
+                        {
+                            return;
+                        }
+
                         Interlocked.Add(ref totalBytes, byteSize);
-                        Interlocked.Increment(ref crawledCount);
 
                         string domain = UrlNormalizer.ExtractDomain(currentUrl);
                         string relativeStoragePath = await _storageService.SavePageAsync(domain, currentUrl, htmlBytes);
@@ -187,7 +200,7 @@ public class CrawlerEngine
                             CrawledAt = DateTime.UtcNow
                         }, token);
 
-                        if (currentDepth < maxDepth)
+                        if (currentDepth < maxDepth && currentCount < maxPagesLimit)
                         {
                             foreach (var (linkUrl, linkCrc) in outgoingLinks)
                             {
@@ -232,13 +245,13 @@ public class CrawlerEngine
             {
                 JobId = jobId,
                 Status = "Completed",
-                CrawledPagesCount = crawledCount,
+                CrawledPagesCount = Math.Min(crawledCount, maxPagesLimit),
                 DiscoveredPagesCount = jobUrlCache.Count,
                 TotalBytesDownloaded = totalBytes,
                 UpdatedAt = DateTime.UtcNow
             }, CancellationToken.None);
         }
 
-        _logger.LogInformation("Crawl loop completed for job {JobId}.", jobId);
+        _logger.LogInformation("Crawl loop finished for job {JobId}. Crawled: {Count}/{Limit}", jobId, Math.Min(crawledCount, maxPagesLimit), maxPagesLimit);
     }
 }

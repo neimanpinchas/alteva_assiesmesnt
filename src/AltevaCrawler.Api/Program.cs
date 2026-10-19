@@ -35,6 +35,17 @@ builder.Services.AddControllers(options =>
     options.Filters.Add<AuthFilter>();
 });
 
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    {
+        Title = "Alteva Crawler API",
+        Version = "v1",
+        Description = "Distributed Job-Based Web Crawler REST API"
+    });
+});
+
 builder.Services.AddSignalR();
 builder.Services.AddHealthChecks();
 
@@ -71,6 +82,13 @@ builder.Services.AddMassTransit(x =>
 });
 
 var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Alteva Crawler API v1");
+    c.RoutePrefix = "swagger";
+});
 
 app.UseCors("AllowAll");
 app.UseRouting();

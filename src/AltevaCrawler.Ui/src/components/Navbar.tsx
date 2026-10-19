@@ -11,7 +11,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
-  selectedJobId,
+  selectedJobId: _selectedJobId,
   onGlobalSearch
 }) => {
   const [query, setQuery] = useState('');
@@ -60,19 +60,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span>New Crawl</span>
         </button>
 
-        {selectedJobId && (
-          <button
-            onClick={() => setActiveTab('details')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              activeTab === 'details'
-                ? 'bg-cyan-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-700'
-            }`}
-          >
-            <Network className="w-3.5 h-3.5" />
-            <span>Job Details</span>
-          </button>
-        )}
+
 
         <button
           onClick={() => setActiveTab('history')}

@@ -24,7 +24,7 @@ export const SidebarHistory: React.FC<SidebarHistoryProps> = ({
 
   const loadJobs = async () => {
     try {
-      const res = await getJobHistory(1, 20);
+      const res = await getJobHistory(1, 25);
       setJobs(res.items);
     } catch (err) {
       console.error(err);
@@ -36,26 +36,26 @@ export const SidebarHistory: React.FC<SidebarHistoryProps> = ({
       <div className="p-4 border-b border-slate-700 flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <History className="w-5 h-5 text-cyan-400" />
-          <h3 className="font-bold text-white text-sm">Crawl Jobs History</h3>
+          <h3 className="font-bold text-white text-sm">Crawl History</h3>
         </div>
         <button
           onClick={onNewCrawl}
-          className="p-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-1 transition"
+          className="p-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-1 transition shadow"
         >
           <PlusCircle className="w-3.5 h-3.5" />
           <span>New</span>
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto divide-y divide-slate-700/50">
         {jobs.map((j) => (
           <div
             key={j.id}
             onClick={() => onSelectJob(j.id)}
-            className={`p-3 rounded-lg border cursor-pointer transition ${
+            className={`p-3.5 cursor-pointer transition ${
               selectedJobId === j.id
-                ? 'bg-slate-700 border-cyan-500 shadow-md'
-                : 'bg-slate-900/60 border-slate-700/60 hover:border-slate-500'
+                ? 'bg-slate-700/90 font-medium'
+                : 'hover:bg-slate-700/40'
             }`}
           >
             <div className="flex items-center justify-between mb-1">

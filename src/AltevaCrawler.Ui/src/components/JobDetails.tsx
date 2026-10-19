@@ -12,7 +12,7 @@ import {
 import { JobSummary, TreeNodeDto, JobMetricsDto, PageSearchResultDto, getJobStatusBadgeClass } from '../types';
 import {
   Activity, Globe, Search, Layers, Ban, FileText,
-  Clock, Pause, Play, Trash2
+  Pause, Play, Trash2, Zap
 } from 'lucide-react';
 
 interface JobDetailsProps {
@@ -29,7 +29,7 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
   const [searchResults, setSearchResults] = useState<PageSearchResultDto[]>([]);
   const [selectedPageContent, setSelectedPageContent] = useState<string | null>(null);
   const [selectedPageUrl, setSelectedPageUrl] = useState<string | null>(null);
-  const [progressHistory, setProgressHistory] = useState<any[]>([]);
+  const [liveHistory, setLiveHistory] = useState<any[]>([]);
 
   useEffect(() => {
     loadJobDetails();
@@ -52,7 +52,7 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
         totalBytesDownloaded: prev.totalBytesDownloaded + data.byteSize
       } : prev);
 
-      setProgressHistory(prev => {
+      setLiveHistory(prev => {
         const last = prev[prev.length - 1] || { pages: 0, bytes: 0 };
         const newPages = last.pages + 1;
         const newBytes = last.bytes + data.byteSize;
@@ -62,8 +62,7 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
             time: new Date().toLocaleTimeString(),
             pages: newPages,
             bytes: newBytes,
-            forecastPages: newPages,
-            forecastBytes: newBytes
+            forecastPages: newPages
           }
         ];
       });
@@ -89,6 +88,9 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
     try {
       const data = await getJob(jobId);
       setJob(data);
+      if (data.progressHistory && data.progressHistory.length > 0) {
+        setLiveHistory(data.progressHistory);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -138,36 +140,33 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
     }
   };
 
-  const renderHighlightedText = (text: string, query: string): React.ReactNode => {
-    if (!query || !query.trim()) {
-      return text;
-    }
-
-    const q = query.trim();
-    const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escapedQuery})`, 'gi');
-    const parts = text.split(regex);
-
-    return parts.map((part, index) => {
-      if (part.toLowerCase() === q.toLowerCase()) {
-        return (
-          <mark key={index} className="bg-yellow-400 text-black px-1 rounded">
-            {part}
-          </mark>
-        );
-      }
-      return part;
-    });
-  };
-
   const openPagePreview = async (pageId: number, url: string) => {
     setSelectedPageUrl(url);
     try {
       const res = await getPageContent(jobId, pageId);
-      setSelectedPageContent(res.textContent);
+      let text = res.textContent;
+
+      if (searchQuery.trim()) {
+        const regex = new RegExp(`(${searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+        text = text.replace(regex, '___MARK_START___$1___MARK_END___');
+      }
+
+      setSelectedPageContent(text);
     } catch (err) {
-      setSelectedPageContent('Page content file not found or not crawled yet.');
+      setSelectedPageContent('Page content file not found on disk.');
     }
+  };
+
+  const renderTextWithHighlights = (text: string) => {
+    if (!text) return null;
+    const parts = text.split(/(___MARK_START___.*?___MARK_END___)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('___MARK_START___') && part.endsWith('___MARK_END___')) {
+        const kw = part.replace('___MARK_START___', '').replace('___MARK_END___', '');
+        return <mark key={i} className="bg-yellow-400 text-slate-950 font-bold px-1 rounded">{kw}</mark>;
+      }
+      return <React.Fragment key={i}>{part}</React.Fragment>;
+    });
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -218,16 +217,21 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
     );
   }
 
-  // Smooth 2D forecast curve extending current yellow mountain
-  const lastHistory = progressHistory[progressHistory.length - 1] || { pages: job.totalPagesCrawled, bytes: job.totalBytesDownloaded };
-  const chartData = progressHistory.length > 0 ? [
-    ...progressHistory,
-    { time: 'Forecast End', pages: null, bytes: null, forecastPages: lastHistory.pages + 15, forecastBytes: lastHistory.bytes + 150000 }
-  ] : [
-    { time: '0s', pages: 0, bytes: 0, forecastPages: 0, forecastBytes: 0 },
-    { time: 'Current', pages: job.totalPagesCrawled, bytes: job.totalBytesDownloaded, forecastPages: job.totalPagesCrawled, forecastBytes: job.totalBytesDownloaded },
-    { time: 'Forecast End', pages: null, bytes: null, forecastPages: job.totalPagesCrawled + 15, forecastBytes: job.totalBytesDownloaded + 150000 }
-  ];
+  const isCompletedState = job.status === 'Completed' || job.status === 'Canceled' || job.status === 'Failed';
+
+  // Construct evolution history points
+  const rawData = liveHistory.length > 0 ? liveHistory : (job.progressHistory || []);
+  const chartData = isCompletedState
+    ? rawData
+    : [
+        ...rawData,
+        {
+          time: 'Forecast End',
+          pages: null,
+          bytes: null,
+          forecastPages: (rawData[rawData.length - 1]?.pages || job.totalPagesCrawled) + 15
+        }
+      ];
 
   const pieData = metrics ? [
     { name: 'Internal Links', value: metrics.domainLinkRatioPie.internalLinks, color: '#06b6d4' },
@@ -256,12 +260,19 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
 
         <div className="flex items-center space-x-4">
           <div className="text-right">
-            <p className="text-xs text-slate-400">Pages Crawled</p>
+            <p className="text-xs text-slate-400">Crawled Pages</p>
             <p className="text-lg font-bold text-cyan-400">{job.totalPagesCrawled} / {job.maxPagesLimit}</p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-slate-400">Bytes Downloaded</p>
+            <p className="text-xs text-slate-400">Total Size</p>
             <p className="text-lg font-bold text-blue-400">{(job.totalBytesDownloaded / 1024).toFixed(1)} KB</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-slate-400">Crawl Speed</p>
+            <p className="text-lg font-bold text-amber-400 flex items-center space-x-1">
+              <Zap className="w-4 h-4" />
+              <span>{job.averagePagesPerSecond || 0} p/s</span>
+            </p>
           </div>
 
           <div className="flex items-center space-x-2 pl-4 border-l border-slate-700">
@@ -269,7 +280,7 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
               <button onClick={handlePause} title="Pause Crawl" className="p-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition">
                 <Pause className="w-4 h-4" />
               </button>
-            ) : job.status === 'Pending' ? (
+            ) : job.status === 'Pending' || job.status === 'Paused' ? (
               <button onClick={handleResume} title="Resume Crawl" className="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition">
                 <Play className="w-4 h-4" />
               </button>
@@ -299,7 +310,7 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
           }`}
         >
           <Activity className="w-4 h-4" />
-          <span>1. Crawl Status & Metrics</span>
+          <span>1. Crawl Evolution & Metrics</span>
         </button>
 
         <button
@@ -327,21 +338,23 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
         </button>
       </div>
 
-      {/* TAB 1: CRAWL STATUS & METRICS */}
+      {/* TAB 1: CRAWL EVOLUTION & METRICS */}
       {activeTab === 'status' && (
         <div className="space-y-6">
           <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-xl space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Activity className="w-5 h-5 text-amber-400" />
-                <h3 className="text-lg font-semibold text-white">2D Crawl Progress & Smooth Forecast</h3>
+                <h3 className="text-lg font-semibold text-white">Crawl Evolution & Speed History</h3>
               </div>
-              {metrics?.forecastedCompletionTime && (
-                <div className="flex items-center space-x-2 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-amber-300">
-                  <Clock className="w-4 h-4" />
-                  <span>Est. Completion: {new Date(metrics.forecastedCompletionTime).toLocaleTimeString()}</span>
-                </div>
-              )}
+              <div className="flex items-center space-x-4 text-xs text-slate-300">
+                <span className="bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700">
+                  Duration: {job.totalDurationSeconds || 0}s
+                </span>
+                <span className="bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 text-cyan-400 font-semibold">
+                  Avg Speed: {job.averagePagesPerSecond || 0} p/s ({job.averageKbPerSecond || 0} KB/s)
+                </span>
+              </div>
             </div>
 
             <div className="h-64 w-full">
@@ -353,7 +366,9 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
                   <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569' }} />
                   <Area yAxisId="left" type="monotone" dataKey="pages" stroke="#eab308" fill="#eab308" fillOpacity={0.4} name="Crawled Pages" />
                   <Line yAxisId="right" type="monotone" dataKey="bytes" stroke="#3b82f6" strokeWidth={2} name="Bytes Downloaded" />
-                  <Area yAxisId="left" type="monotone" dataKey="forecastPages" stroke="#fef08a" fill="#fef08a" fillOpacity={0.15} strokeDasharray="3 3" name="Forecast Continuation" />
+                  {!isCompletedState && (
+                    <Area yAxisId="left" type="monotone" dataKey="forecastPages" stroke="#fef08a" fill="#fef08a" fillOpacity={0.15} strokeDasharray="3 3" name="Forecast Continuation" />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -457,12 +472,12 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
             </form>
 
             {searchResults.length > 0 && (
-              <div className="space-y-2 mt-4 max-h-80 overflow-y-auto">
+              <div className="divide-y divide-slate-700/60 bg-slate-900 rounded-lg border border-slate-700 max-h-80 overflow-y-auto">
                 {searchResults.map((res) => (
                   <div
                     key={res.id}
                     onClick={() => openPagePreview(res.id, res.url)}
-                    className="p-3 bg-slate-900 hover:bg-slate-700 cursor-pointer rounded-lg border border-slate-700 flex justify-between items-center text-sm transition"
+                    className="p-3 hover:bg-slate-800 cursor-pointer flex justify-between items-center text-sm transition"
                   >
                     <span className="text-slate-200 truncate max-w-md font-medium">{res.url}</span>
                     <span className="px-2 py-1 bg-indigo-900/60 text-indigo-300 text-xs font-mono rounded" title={`Similarity Match Distance: ${res.hammingDistance}`}>
@@ -478,28 +493,28 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
           <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-xl space-y-3">
             <div className="flex items-center space-x-2 text-slate-300 font-semibold border-b border-slate-700 pb-2">
               <FileText className="w-4 h-4 text-cyan-400" />
-              <span>Searched Files Sidebar</span>
+              <span>Searched Files List</span>
             </div>
             {searchResults.length > 0 ? (
-              <div className="space-y-2 max-h-80 overflow-y-auto">
+              <div className="divide-y divide-slate-700/50 max-h-80 overflow-y-auto">
                 {searchResults.map((res) => (
                   <div
                     key={res.id}
                     onClick={() => openPagePreview(res.id, res.url)}
-                    className="p-2 bg-slate-900 hover:bg-slate-700 cursor-pointer rounded text-xs text-slate-300 truncate transition border border-slate-700/50"
+                    className="py-2 px-1 hover:bg-slate-700/50 cursor-pointer text-xs text-slate-300 truncate transition"
                   >
                     📄 {res.domain} / Page #{res.id}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-slate-500">Perform a search to populate the sidebar file list.</p>
+              <p className="text-xs text-slate-500">Perform a search to populate the file list.</p>
             )}
           </div>
         </div>
       )}
 
-      {/* Page Content Preview Drawer with Keyword Highlighting */}
+      {/* Page Content Preview Drawer with Safe React Term Highlighting */}
       {selectedPageUrl && (
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-xl space-y-4">
           <div className="flex items-center justify-between border-b border-slate-700 pb-3">
@@ -515,9 +530,7 @@ export const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onJobDeleted }) =
             </button>
           </div>
           <pre className="p-4 bg-slate-900 rounded-lg text-xs font-mono text-slate-300 max-h-72 overflow-auto whitespace-pre-wrap border border-slate-700">
-            {selectedPageContent
-              ? renderHighlightedText(selectedPageContent, searchQuery)
-              : 'Loading content...'}
+            {renderTextWithHighlights(selectedPageContent || '') || 'Loading content...'}
           </pre>
         </div>
       )}

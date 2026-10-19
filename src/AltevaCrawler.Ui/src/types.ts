@@ -1,3 +1,11 @@
+export interface CrawlEvolutionPointDto {
+  time: string;
+  pages: number;
+  bytes: number;
+  pagesPerSecond?: number;
+  kbPerSecond?: number;
+}
+
 export interface JobSummary {
   id: string;
   url: string;
@@ -8,6 +16,9 @@ export interface JobSummary {
   discoveredLinksCount: number;
   totalBytesDownloaded: number;
   domainLinkRatio?: number;
+  averagePagesPerSecond?: number;
+  averageKbPerSecond?: number;
+  totalDurationSeconds?: number;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -18,6 +29,7 @@ export interface JobSummary {
     transitionedAt: string;
     reason?: string;
   }>;
+  progressHistory?: CrawlEvolutionPointDto[];
 }
 
 export interface TreeNodeDto {
@@ -75,6 +87,7 @@ export function getJobStatusBadgeClass(status: string): string {
     case 'Running':
       return 'bg-blue-900/60 text-blue-300 border border-blue-700 animate-pulse';
     case 'Pending':
+    case 'Paused':
       return 'bg-amber-900/60 text-amber-300 border border-amber-700';
     case 'Canceled':
       return 'bg-rose-900/60 text-rose-300 border border-rose-700';

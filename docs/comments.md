@@ -66,3 +66,8 @@ once done the chart should show the history of the crawl evolvement, not just 0 
 change the file store to an interface and implemnt a mock s3 impl for reference but not to use
 add a page explaining the benefits of using haxe ot share common logic and the interfaces used ot enforce contracts, mention that openapi specs, and nwag are more common i chose that path
 add a openapi.yaml and open api style interactive docs, maybe use nswag style for dtos, and haxe for shared proceedures
+its overrunngin the max pages
+- remove job details
+- prrove tha tpageing works
+- do not use cards, use seprator lines
+-
