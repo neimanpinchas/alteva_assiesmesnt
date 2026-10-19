@@ -31,8 +31,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         self._send_json(200, {"status": "success", "message": "Deploy trigger received. Pulling from GitHub and rebuilding containers..."})
         
-        # Run pull & docker compose rebuild asynchronously
-        cmd = f"cd '{PROJECT_DIR}' && git pull origin main && docker compose up -d --build"
+        # Run fetch, hard reset to main, & docker compose rebuild asynchronously
+        cmd = f"cd '{PROJECT_DIR}' && git fetch origin && git reset --hard origin/main && (docker compose up -d --build || docker-compose up -d --build)"
         subprocess.Popen(["/bin/bash", "-c", cmd])
 
     def do_GET(self):

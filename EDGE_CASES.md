@@ -23,6 +23,7 @@ This document highlights all edge cases, network behaviors, concurrency race con
 ---
 
 ## 3. Concurrency, Message Ordering & Foreign Key Race Conditions
+- **Link event before its source page event**: the API creates the source page as an uncrawled placeholder (get-or-create on a unique URL hash) instead of dropping the edge, and the later `PageCrawledEvent` reuses the same row, so tree edges are never lost to ordering. Duplicate deliveries and concurrent inserts cannot create a second page or edge (unique keys + duplicate-key re-read).
 - **Event Out-of-Order Delivery**: `ApiLinkDiscoveredConsumer` and `ApiPageCrawledConsumer` check if a `Job` exists in MySQL before creating `JobPageLinks` records, preventing orphan foreign key (`FK_JobPageLinks_Jobs_JobId`) violations if a job was pruned or cancelled.
 - **Parallel Crawl Bounding**: Uses `SemaphoreSlim(5)` to bound concurrent HTTP requests, avoiding thread pool starvation or rate-limit bans.
 - **Immediate In-Memory Deduplication**: Performs an $O(1)$ check against a per-job `HashSet<uint>` BEFORE issuing HTTP requests, preventing duplicate in-flight requests. It is per job on purpose: a cache shared across jobs made a second crawl of the same site skip all of its links.

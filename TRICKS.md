@@ -76,6 +76,10 @@ The database schema (`Jobs`, `Pages`, `JobPageLinks`, `JobStatusTransitions`) wa
 ### 16. Haxe/C# SimHash Parity
 - The Haxe 64-bit SimHash uses the same algorithm as the C# `SimHashCalculator` (lower-cased `\w+` tokens hashed with CRC-64, per-bit voting), and a unit test asserts both produce the same fingerprint. See [HAXE.md](HAXE.md).
 
+### 18. Order-Independent, Idempotent Graph Writes
+- Events reach the API concurrently and in any order: a `LinkDiscoveredEvent` can be handled before the `PageCrawledEvent` of its source page. The old consumers skipped the edge when the source row did not exist yet, so the tree showed the start page with no children. `PageGraphWriter` now does get-or-create for both ends (an uncrawled placeholder is filled in by the later page event) and inserts edges with a duplicate-key catch.
+- Identity is a persisted generated `UrlHash = UNHEX(SHA2(NormalizedUrl,256))` with a UNIQUE index (collision-safe, 32 bytes instead of an up-to-8 KB URL index) next to the fast, non-unique `UrlCrc32`. A lost race re-reads the winner's row. `SchemaUpgrader` merges legacy duplicate pages/edges before creating the keys. Verified with 24 concurrent creates of one URL and a link-before-page scenario on real MySQL.
+
 ### 17. Classified, User-Visible Fetch Errors
 - `CrawlErrorClassifier` walks the exception chain (`AuthenticationException`, `HttpRequestException.HttpRequestError`, `SocketException`, timeouts) and returns a `kind` plus a short message that travels on `PageCrawledEvent`, is stored on the page and rendered as badges. Because TLS failures are classified before any retry decision, the Polly policy skips them (no wasted back-off) while still retrying 5xx, 408, network errors and timeouts. A timeout caught only when the job token is not cancelled is the key distinction: otherwise `HttpClient`'s `TaskCanceledException` looks like a user cancel and the page silently disappears.
 

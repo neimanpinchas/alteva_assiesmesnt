@@ -149,6 +149,8 @@ public class EndToEndCrawlTests
         services.AddLogging();
         services.AddSignalR();
         services.AddScoped<AppDbContext>(_ => new AppDbContext(options));
+        services.AddScoped<AltevaCrawler.Api.Services.PageGraphWriter>();
+        services.AddScoped<AltevaCrawler.Api.Services.PageGraphWriter>();
         services.AddSingleton<IStorageService>(new MockS3StorageService("e2e"));
         services.AddHttpClient("CrawlClient");
         services.AddSingleton<CrawlerEngine>(sp => new CrawlerEngine(

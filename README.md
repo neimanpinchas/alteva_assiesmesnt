@@ -55,7 +55,7 @@ sequenceDiagram
    - Verified statelessly in-memory in `AuthFilter.cs` without querying MySQL.
 
 2. **In-Memory & Database De-duplication**:
-   - `Pages.UrlCrc32` (`INT UNSIGNED`) is a **persisted generated column** computed by MySQL as `CRC32(NormalizedUrl)` (`STORED`, indexed as `IX_Pages_UrlCrc32`). Code never assigns it; lookups filter on the integer first and then compare the exact URL. MySQL's `CRC32` over utf8mb4 bytes equals the C# `Crc32` over UTF-8 bytes (checked by a test against the real database). The index is not unique because CRC32 can collide.
+   - `Pages.UrlCrc32` (`INT UNSIGNED`) is a **persisted generated column** computed by MySQL as `CRC32(NormalizedUrl)` (`STORED`, indexed as `IX_Pages_UrlCrc32`). Code never assigns it; lookups filter on the integer first and then compare the exact URL. MySQL's `CRC32` over utf8mb4 bytes equals the C# `Crc32` over UTF-8 bytes (checked by a test against the real database). The index is not unique because CRC32 can collide; the collision-safe identity of a page is the second generated column `UrlHash` (`UNHEX(SHA2(NormalizedUrl,256))`, `BINARY(32)`) with a **unique** index, and `JobPageLinks (JobId, SourcePageId, TargetPageId)` is unique too. All graph writes are get-or-create (`PageGraphWriter`), so concurrent or repeated events can neither duplicate a page/edge nor lose an edge when a link event is processed before the page event of its source.
    - The worker keeps a **per-job** in-memory `HashSet<uint>` of URL hashes (cleared when the job ends) to suppress duplicate URLs before any HTTP request. A shared cache across jobs was a bug: a second crawl of the same site skipped every link.
 
 3. **Pluggable Storage Abstraction (`IStorageService`)**:
@@ -143,7 +143,7 @@ Up to 5 pages are fetched concurrently per job. `MaxPagesLimit` is enforced atom
 
 ## ⚠️ Known Limitations
 
-- **Idempotency is partial**: there is no unique key on `Pages` or `JobPageLinks`, consumers do check-then-insert, and a redelivered `PageCrawledEvent` would double-count the job totals.
+- **Idempotency is partial**: pages and edges are now idempotent (unique `Pages.UrlHash` and unique `JobPageLinks` edge key, get-or-create writes), but job totals (`TotalPagesCrawled`, bytes) are still incremented per event, so a redelivered `PageCrawledEvent` would double-count them until the final `Completed` event overwrites the totals.
 - CRC32 collisions are possible: the index on `UrlCrc32` is not unique, and the in-memory per-job set is keyed by the hash alone.
 - No EF migrations (`EnsureCreated`). To cover older databases, the API runs an idempotent `SchemaUpgrader` at start-up that converts a plain `UrlCrc32` column to the generated column and adds a missing `Pages.ByteSize`; other schema changes still need the database to be recreated. `schema.sql` is a legodb export and is not what builds the DB.
 - Pages are re-downloaded per job (no cross-job download reuse), so "bytes saved" only reports the size of pages shared with other jobs.
