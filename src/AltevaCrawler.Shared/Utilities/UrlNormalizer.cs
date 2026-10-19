@@ -1,45 +1,48 @@
 namespace AltevaCrawler.Shared.Utilities;
 
 using System;
+using System.Collections.Generic;
 using System.IO.Hashing;
 using System.Text;
 
 public static class UrlNormalizer
 {
-    public static string? Normalize(string rawUrl, string? baseUrl = null)
+    public static string? Normalize(string rawUrl, string? baseUrl = null, bool stripWww = true)
     {
         if (string.IsNullOrWhiteSpace(rawUrl)) return null;
 
         string trimmed = rawUrl.Trim();
 
-        // Filter non-http schemes
-        if (trimmed.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("tel:", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        // Protocol-relative links
+        if (trimmed.StartsWith("//"))
         {
-            return null;
+            string scheme = "https:";
+            if (!string.IsNullOrEmpty(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUriScheme))
+            {
+                scheme = baseUriScheme.Scheme + ":";
+            }
+            trimmed = scheme + trimmed;
         }
-
         // Auto-prepend https:// if no scheme is provided and no baseUrl exists
-        if (string.IsNullOrEmpty(baseUrl) &&
-            !trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
-            !trimmed.StartsWith("/") &&
-            !trimmed.StartsWith("."))
+        else if (string.IsNullOrEmpty(baseUrl) &&
+                 !trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                 !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+                 !trimmed.StartsWith("/") &&
+                 !trimmed.StartsWith("."))
         {
-            trimmed = "https://" + trimmed;
+            if (!Uri.TryCreate(trimmed, UriKind.Absolute, out _))
+            {
+                trimmed = "https://" + trimmed;
+            }
         }
 
-        Uri baseUri;
         Uri fullUri;
 
         try
         {
             if (!string.IsNullOrEmpty(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsedBase))
             {
-                baseUri = parsedBase;
-                if (!Uri.TryCreate(baseUri, trimmed, out fullUri!))
+                if (!Uri.TryCreate(parsedBase, trimmed, out fullUri!))
                 {
                     return null;
                 }
@@ -57,17 +60,30 @@ public static class UrlNormalizer
             return null;
         }
 
+        // D2: Allow-list for http and https only
         if (fullUri.Scheme != Uri.UriSchemeHttp && fullUri.Scheme != Uri.UriSchemeHttps)
         {
             return null;
         }
 
+        string host = fullUri.Host.ToLowerInvariant();
+        if (stripWww && host.StartsWith("www.") && host.Length > 4)
+        {
+            host = host.Substring(4);
+        }
+
         var builder = new UriBuilder(fullUri)
         {
             Fragment = string.Empty,
-            Host = fullUri.Host.ToLowerInvariant(),
+            Host = host,
             Scheme = fullUri.Scheme.ToLowerInvariant()
         };
+
+        if ((builder.Scheme == Uri.UriSchemeHttp && builder.Port == 80) ||
+            (builder.Scheme == Uri.UriSchemeHttps && builder.Port == 443))
+        {
+            builder.Port = -1;
+        }
 
         string path = builder.Path;
         if (path.Length > 1 && path.EndsWith('/'))
@@ -78,13 +94,34 @@ public static class UrlNormalizer
         return builder.Uri.AbsoluteUri;
     }
 
-    public static string ExtractDomain(string url)
+    public static string ExtractDomain(string url, bool stripWww = true)
     {
+        if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+
+        string host;
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
-            return uri.Host.ToLowerInvariant();
+            host = uri.Host.ToLowerInvariant();
         }
-        return string.Empty;
+        else
+        {
+            string tempUrl = url.Contains("://") ? url : "https://" + url;
+            if (Uri.TryCreate(tempUrl, UriKind.Absolute, out var tempUri))
+            {
+                host = tempUri.Host.ToLowerInvariant();
+            }
+            else
+            {
+                host = url.Trim().ToLowerInvariant();
+            }
+        }
+
+        if (stripWww && host.StartsWith("www.") && host.Length > 4)
+        {
+            host = host.Substring(4);
+        }
+
+        return host;
     }
 
     public static uint ComputeCrc32(string input)
@@ -94,8 +131,37 @@ public static class UrlNormalizer
         return Crc32.HashToUInt32(bytes);
     }
 
-    public static uint ComputeDomainHash(string domain)
+    public static uint ComputeDomainHash(string domain, bool stripWww = true)
     {
-        return ComputeCrc32(domain.ToLowerInvariant());
+        string extracted = ExtractDomain(domain, stripWww);
+        return ComputeCrc32(extracted);
+    }
+
+    public static double CalculateDomainLinkRatio(string startDomain, IEnumerable<string> outgoingLinkUrls, bool stripWww = true)
+    {
+        if (outgoingLinkUrls == null) return 0.0;
+
+        string normalizedStartDomain = ExtractDomain(startDomain, stripWww);
+        int total = 0;
+        int sameDomainCount = 0;
+
+        foreach (var linkUrl in outgoingLinkUrls)
+        {
+            if (string.IsNullOrWhiteSpace(linkUrl)) continue;
+            total++;
+            string linkDomain = ExtractDomain(linkUrl, stripWww);
+            if (string.Equals(linkDomain, normalizedStartDomain, StringComparison.OrdinalIgnoreCase))
+            {
+                sameDomainCount++;
+            }
+        }
+
+        return CalculateDomainLinkRatio(sameDomainCount, total);
+    }
+
+    public static double CalculateDomainLinkRatio(int outgoingInDomainCount, int totalOutgoingCount)
+    {
+        if (totalOutgoingCount <= 0) return 0.0;
+        return (double)outgoingInDomainCount / totalOutgoingCount;
     }
 }

@@ -102,6 +102,8 @@ M System.Runtime.InteropServices._ModuleBuilder
 M Array
 C Array
 C Array
+M SimHash
+C SimHash
 M cs.system.text.regularexpressions.MatchEvaluator
 M System.MemberAccessException
 M System.ArgumentException
@@ -225,6 +227,8 @@ M cs.system.Uri
 M System.Diagnostics.SymbolStore.SymbolToken
 M System.Reflection.AssemblyName
 M cs.system.UriHostNameType
+M Date
+C Date
 M StdTypes
 M System.Security.AccessControl.AuthorizationRule
 M cs.system.reflection.Assembly
@@ -251,6 +255,8 @@ M System.Diagnostics.ProcessStartInfo
 M cs.system.runtime.interopservices.CharSet
 M cs.system.threading.ThreadStart
 M System.Security.Policy.CodeGroup
+M StringTools
+C StringTools
 M cs.system.collections.ArrayList
 M System.Text.DecoderFallback
 M System.Text.RegularExpressions.Group
@@ -344,6 +350,8 @@ M cs.system.ConsoleColor
 M haxe.PosInfos
 M cs.Flags
 M cs.types.Int8
+M Crypto
+C Crypto
 M cs.system.globalization.CompareOptions
 M System.Reflection.Emit.GenericTypeParameterBuilder
 M System.Collections.Generic.IEnumerator`1

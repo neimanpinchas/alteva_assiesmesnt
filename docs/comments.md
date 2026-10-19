@@ -58,3 +58,6 @@ what will hapen if the db is down or the mq can we make it reprt nicely?
 # section 4
 please make a good gitignore file, and commit to github
 on delete list doesnt update
+# section 5
+a. once completed it shoudl no longer hsow a forecast
+b. link tree view stopped showing tree, siunds like links are broken

@@ -1,8 +1,14 @@
 -cp .
 -main Main
+Crypto
+SimHash
+UrlUtils
 -js ../AltevaCrawler.Ui/src/haxeGenerated/shared.js
 
 --next
 -cp .
 -main Main
+Crypto
+SimHash
+UrlUtils
 -cs ../AltevaCrawler.Shared/HaxeGenerated

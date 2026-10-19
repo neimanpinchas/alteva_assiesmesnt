@@ -1,5 +1,6 @@
 package;
 
+@:keep
 class SimHash {
     public static function hammingDistance(h1:Float, h2:Float):Int {
         // Hamming distance helper for 32-bit integer representations

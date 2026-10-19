@@ -1,12 +1,19 @@
 namespace AltevaCrawler.Tests;
 
 using System;
+using System.Collections.Generic;
+using System.Numerics;
 using Xunit;
+using AltevaCrawler.Shared.Contracts;
 using AltevaCrawler.Shared.Security;
 using AltevaCrawler.Shared.Utilities;
 
 public class UnitTests
 {
+    private readonly HaxeUtilsImpl _haxeUtils = new HaxeUtilsImpl();
+
+    #region Existing Unit Tests
+
     [Fact]
     public void UrlNormalizer_NormalizesRelativeUrlAndStripsFragments()
     {
@@ -69,4 +76,229 @@ public class UnitTests
 
         Assert.False(isValid);
     }
+
+    #endregion
+
+    #region Haxe Parity Tests
+
+    [Theory]
+    [InlineData("https://example.com/test")]
+    [InlineData("hello world")]
+    [InlineData("alteva_crawler")]
+    [InlineData("123456789")]
+    public void HaxeParity_Crc32_MatchesNativeCrc32(string input)
+    {
+        uint nativeCrc = UrlNormalizer.ComputeCrc32(input);
+        uint haxeCrc = _haxeUtils.ComputeCrc32(input);
+
+        Assert.Equal(nativeCrc, haxeCrc);
+    }
+
+    [Fact]
+    public void HaxeParity_SimHash32_AndHammingDistance()
+    {
+        string text1 = "The quick brown fox jumps over the lazy dog";
+        string text2 = "The quick brown fox jumps over the lazy cat";
+
+        int h1 = _haxeUtils.ComputeSimHash32(text1);
+        int h2 = _haxeUtils.ComputeSimHash32(text2);
+
+        int haxeDistance = _haxeUtils.HammingDistance(h1, h2);
+        int nativeBitwiseDistance = BitOperations.PopCount((uint)h1 ^ (uint)h2);
+
+        Assert.NotEqual(0, h1);
+        Assert.NotEqual(0, h2);
+        Assert.Equal(nativeBitwiseDistance, haxeDistance);
+        Assert.Equal(0, _haxeUtils.HammingDistance(h1, h1));
+    }
+
+    [Fact]
+    public void HaxeParity_CryptoSimpleAuthToken_CreatesAndVerifies()
+    {
+        string sessionId = "user_session_12345";
+        string secretKey = "super_secret_key";
+
+        string token = _haxeUtils.CreateSimpleAuthToken(sessionId, secretKey);
+
+        Assert.NotNull(token);
+        Assert.Contains(".", token);
+        Assert.StartsWith(sessionId + ":", token);
+
+        bool isValid = _haxeUtils.VerifySimpleAuthToken(token, secretKey);
+        Assert.True(isValid);
+    }
+
+    [Fact]
+    public void HaxeParity_CryptoSimpleAuthToken_RejectsTamperedOrWrongSecret()
+    {
+        string sessionId = "user_session_12345";
+        string secretKey = "correct_secret";
+        string wrongSecret = "wrong_secret";
+
+        string token = _haxeUtils.CreateSimpleAuthToken(sessionId, secretKey);
+
+        Assert.False(_haxeUtils.VerifySimpleAuthToken(token, wrongSecret));
+        Assert.False(_haxeUtils.VerifySimpleAuthToken(token + "x", secretKey));
+        Assert.False(_haxeUtils.VerifySimpleAuthToken("invalid_token_format", secretKey));
+    }
+
+    [Theory]
+    [InlineData("https://example.com/path/page.html", "example.com")]
+    [InlineData("http://sub.domain.co.uk:8080/test", "sub.domain.co.uk")]
+    public void HaxeParity_ExtractDomain_MatchesExpectedDomain(string url, string expectedDomain)
+    {
+        string haxeDomain = _haxeUtils.ExtractDomain(url);
+        Assert.Equal(expectedDomain, haxeDomain);
+    }
+
+    #endregion
+
+    #region Domain Link Ratio Tests
+
+    [Fact]
+    public void DomainLinkRatio_CalculatesCorrectRatioForOutgoingLinks()
+    {
+        string startDomain = "example.com";
+        var outgoingLinks = new List<string>
+        {
+            "https://example.com/about",
+            "https://example.com/contact",
+            "https://otherdomain.org/blog",
+            "https://sub.external.com/api"
+        };
+
+        // 2 out of 4 links are in example.com
+        double ratio = UrlNormalizer.CalculateDomainLinkRatio(startDomain, outgoingLinks);
+        Assert.Equal(0.5, ratio);
+    }
+
+    [Fact]
+    public void DomainLinkRatio_ReturnsZeroForEmptyOutgoingLinks()
+    {
+        double ratioFromList = UrlNormalizer.CalculateDomainLinkRatio("example.com", new List<string>());
+        double ratioFromCount = UrlNormalizer.CalculateDomainLinkRatio(0, 0);
+
+        Assert.Equal(0.0, ratioFromList);
+        Assert.Equal(0.0, ratioFromCount);
+    }
+
+    [Fact]
+    public void DomainLinkRatio_HandlesWwwSubdomainsCorrectly()
+    {
+        string startDomain = "https://www.example.com";
+        var outgoingLinks = new List<string>
+        {
+            "https://example.com/page1",
+            "https://www.example.com/page2",
+            "https://external.com/page3"
+        };
+
+        // With stripWww = true (default), www.example.com and example.com are the same domain
+        double ratio = UrlNormalizer.CalculateDomainLinkRatio(startDomain, outgoingLinks, stripWww: true);
+        Assert.Equal(2.0 / 3.0, ratio, precision: 4);
+    }
+
+    [Fact]
+    public void DomainLinkRatio_CalculatesFromCounts()
+    {
+        double ratio = UrlNormalizer.CalculateDomainLinkRatio(3, 4);
+        Assert.Equal(0.75, ratio);
+    }
+
+    #endregion
+
+    #region URL Normalizer Tests (D1, D2, D3)
+
+    [Fact]
+    public void UrlNormalizer_D1_StripsWwwPrefix()
+    {
+        string raw = "https://www.example.com/about/us";
+        string? normalized = UrlNormalizer.Normalize(raw, stripWww: true);
+
+        Assert.Equal("https://example.com/about/us", normalized);
+        Assert.Equal("example.com", UrlNormalizer.ExtractDomain(raw, stripWww: true));
+    }
+
+    [Fact]
+    public void UrlNormalizer_D1_AllowsDisablingWwwStripping()
+    {
+        string raw = "https://www.example.com/about/us";
+        string? normalized = UrlNormalizer.Normalize(raw, stripWww: false);
+
+        Assert.Equal("https://www.example.com/about/us", normalized);
+        Assert.Equal("www.example.com", UrlNormalizer.ExtractDomain(raw, stripWww: false));
+    }
+
+    [Fact]
+    public void UrlNormalizer_D1_DomainHashMatchesWithAndWithoutWww()
+    {
+        uint hashWww = UrlNormalizer.ComputeDomainHash("www.example.com", stripWww: true);
+        uint hashNoWww = UrlNormalizer.ComputeDomainHash("example.com", stripWww: true);
+
+        Assert.Equal(hashNoWww, hashWww);
+    }
+
+    [Fact]
+    public void UrlNormalizer_D2_AllowsHttpAndHttpsOnly()
+    {
+        Assert.NotNull(UrlNormalizer.Normalize("http://example.com/page"));
+        Assert.NotNull(UrlNormalizer.Normalize("https://example.com/page"));
+    }
+
+    [Fact]
+    public void UrlNormalizer_D2_RejectsDisallowedSchemes()
+    {
+        Assert.Null(UrlNormalizer.Normalize("mailto:info@example.com"));
+        Assert.Null(UrlNormalizer.Normalize("tel:+18005550199"));
+        Assert.Null(UrlNormalizer.Normalize("javascript:alert('xss')"));
+        Assert.Null(UrlNormalizer.Normalize("data:text/html,<h1>Hello</h1>"));
+        Assert.Null(UrlNormalizer.Normalize("ftp://ftp.example.com/file.txt"));
+        Assert.Null(UrlNormalizer.Normalize("file:///C:/config.sys"));
+    }
+
+    [Fact]
+    public void UrlNormalizer_D2_ResolvesProtocolRelativeAndRelativeUrls()
+    {
+        string baseHttps = "https://example.com/docs/index.html";
+
+        string? protocolRelative = UrlNormalizer.Normalize("//cdn.example.com/styles.css", baseHttps);
+        string? pathRelative = UrlNormalizer.Normalize("../images/logo.png", baseHttps);
+
+        Assert.Equal("https://cdn.example.com/styles.css", protocolRelative);
+        Assert.Equal("https://example.com/images/logo.png", pathRelative);
+    }
+
+    [Fact]
+    public void UrlNormalizer_D3_RetainsQueryParametersAndStripsFragment()
+    {
+        string raw = "https://example.com/search?q=dotnet&sort=asc#top";
+        string? normalized = UrlNormalizer.Normalize(raw);
+
+        Assert.NotNull(normalized);
+        Assert.Equal("https://example.com/search?q=dotnet&sort=asc", normalized);
+        Assert.DoesNotContain("#top", normalized);
+    }
+
+    [Fact]
+    public void UrlNormalizer_D3_DistinguishesUrlsWithDifferentQueryParams()
+    {
+        string url1 = UrlNormalizer.Normalize("https://example.com/product?id=1")!;
+        string url2 = UrlNormalizer.Normalize("https://example.com/product?id=2")!;
+
+        Assert.Equal("https://example.com/product?id=1", url1);
+        Assert.Equal("https://example.com/product?id=2", url2);
+        Assert.NotEqual(url1, url2);
+    }
+
+    [Fact]
+    public void UrlNormalizer_D3_RemovesDefaultPorts()
+    {
+        string httpPort80 = UrlNormalizer.Normalize("http://example.com:80/path")!;
+        string httpsPort443 = UrlNormalizer.Normalize("https://example.com:443/path")!;
+
+        Assert.Equal("http://example.com/path", httpPort80);
+        Assert.Equal("https://example.com/path", httpsPort443);
+    }
+
+    #endregion
 }

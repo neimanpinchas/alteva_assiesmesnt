@@ -47,7 +47,11 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
                 UrlCrc32 = msg.UrlCrc32,
                 Domain = UrlNormalizer.ExtractDomain(msg.Url),
                 DomainHash = domainHash,
+                SimHash = msg.SimHash,
+                ContentHash = msg.ContentHash,
+                StoragePath = msg.StoragePath,
                 StatusCode = msg.StatusCode,
+                ByteSize = msg.ByteSize,
                 OutgoingLinksCount = msg.OutgoingLinksCount,
                 IsCrawled = true,
                 CrawledAt = msg.CrawledAt
@@ -56,7 +60,11 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
         }
         else
         {
+            page.SimHash = msg.SimHash;
+            page.ContentHash = msg.ContentHash;
+            page.StoragePath = msg.StoragePath;
             page.StatusCode = msg.StatusCode;
+            page.ByteSize = msg.ByteSize;
             page.OutgoingLinksCount = msg.OutgoingLinksCount;
             page.IsCrawled = true;
             page.CrawledAt = msg.CrawledAt;

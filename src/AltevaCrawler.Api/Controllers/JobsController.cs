@@ -262,6 +262,9 @@ public class JobsController : ControllerBase
         int uniquePagesCount = pageJobCounts.Count(x => x.Count <= 1);
         int sharedPagesCount = pageJobCounts.Count(x => x.Count > 1);
 
+        var sharedPageIds = pageJobCounts.Where(x => x.Count > 1).Select(x => x.PageId).ToHashSet();
+        long estimatedBytesSaved = pages.Where(p => sharedPageIds.Contains(p.Id)).Sum(p => p.ByteSize);
+
         int totalDiscovered = await _dbContext.JobPageLinks.CountAsync(l => l.JobId == id);
 
         DateTime? forecastedCompletion = null;
@@ -290,7 +293,7 @@ public class JobsController : ControllerBase
             BandwidthEfficiency = new BandwidthEfficiencyDto
             {
                 TotalBytesDownloaded = job.TotalBytesDownloaded,
-                EstimatedBytesSaved = sharedPagesCount * 15000
+                EstimatedBytesSaved = estimatedBytesSaved
             },
             ForecastedCompletionTime = forecastedCompletion
         };
@@ -376,12 +379,35 @@ public class JobsController : ControllerBase
         }
 
         string html = await System.IO.File.ReadAllTextAsync(page.StoragePath);
+        string text = ExtractPlainText(html);
+
         return Ok(new PageContentDto
         {
             PageId = page.Id,
             Url = page.Url,
-            Html = html
+            Html = text
         });
+    }
+
+    private static string ExtractPlainText(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html)) return string.Empty;
+
+        var doc = new HtmlAgilityPack.HtmlDocument();
+        doc.LoadHtml(html);
+
+        var nodesToRemove = doc.DocumentNode.SelectNodes("//script|//style|//comment()");
+        if (nodesToRemove != null)
+        {
+            foreach (var node in nodesToRemove)
+            {
+                node.Remove();
+            }
+        }
+
+        string innerText = doc.DocumentNode.InnerText;
+        string decodedText = System.Net.WebUtility.HtmlDecode(innerText);
+        return System.Net.WebUtility.HtmlEncode(decodedText);
     }
 
     [HttpGet]
@@ -447,6 +473,12 @@ public class JobsController : ControllerBase
         job.Status = JobStatus.Pending;
         await _dbContext.SaveChangesAsync();
 
+        await _publishEndpoint.Publish(new PauseJobRequestedEvent
+        {
+            JobId = id,
+            RequestedAt = DateTime.UtcNow
+        });
+
         await _publishEndpoint.Publish(new JobProgressUpdatedEvent
         {
             JobId = id,
@@ -468,13 +500,9 @@ public class JobsController : ControllerBase
         job.Status = JobStatus.Running;
         await _dbContext.SaveChangesAsync();
 
-        await _publishEndpoint.Publish(new CrawlJobRequestedEvent
+        await _publishEndpoint.Publish(new ResumeJobRequestedEvent
         {
             JobId = id,
-            Url = job.Url,
-            UrlCrc32 = UrlNormalizer.ComputeCrc32(job.Url),
-            MaxDepth = job.MaxDepth,
-            MaxPagesLimit = job.MaxPagesLimit,
             RequestedAt = DateTime.UtcNow
         });
 
@@ -540,6 +568,12 @@ public class JobsController : ControllerBase
         });
 
         await _dbContext.SaveChangesAsync();
+
+        await _publishEndpoint.Publish(new CancelJobRequestedEvent
+        {
+            JobId = id,
+            RequestedAt = DateTime.UtcNow
+        });
 
         await _publishEndpoint.Publish(new JobProgressUpdatedEvent
         {

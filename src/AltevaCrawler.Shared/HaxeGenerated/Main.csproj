@@ -63,6 +63,8 @@
 	
     <Compile Include="src\Array.cs"/>
 	
+    <Compile Include="src\SimHash.cs"/>
+	
     <Compile Include="src\cs\internal\Function.cs"/>
 	
     <Compile Include="src\haxe\exceptions\PosException.cs"/>
@@ -71,6 +73,10 @@
 	
     <Compile Include="src\Type.cs"/>
 	
+    <Compile Include="src\Date.cs"/>
+	
+    <Compile Include="src\StringTools.cs"/>
+	
     <Compile Include="src\haxe\iterators\ArrayIterator.cs"/>
 	
     <Compile Include="src\Reflect.cs"/>
@@ -78,6 +84,8 @@
     <Compile Include="src\haxe\exceptions\NotImplementedException.cs"/>
 	
     <Compile Include="src\UrlUtils.cs"/>
+	
+    <Compile Include="src\Crypto.cs"/>
 	
     <Compile Include="src\haxe\iterators\ArrayKeyValueIterator.cs"/>
 	

@@ -1,5 +1,6 @@
 package;
 
+@:keep
 class UrlUtils {
     public static function crc32(str:String):Int {
         var crc:Int = 0xFFFFFFFF;

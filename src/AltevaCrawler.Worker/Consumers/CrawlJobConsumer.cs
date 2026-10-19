@@ -22,6 +22,6 @@ public class CrawlJobConsumer : IConsumer<CrawlJobRequestedEvent>
         var msg = context.Message;
         _logger.LogInformation("Received CrawlJobRequestedEvent for JobId: {JobId}, Url: {Url}", msg.JobId, msg.Url);
 
-        await _crawlerEngine.ProcessJobAsync(msg.JobId, msg.Url, msg.MaxDepth);
+        await _crawlerEngine.ProcessJobAsync(msg.JobId, msg.Url, msg.MaxDepth, msg.MaxPagesLimit, context.CancellationToken);
     }
 }

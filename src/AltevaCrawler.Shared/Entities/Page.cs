@@ -40,6 +40,8 @@ public class Page
     [MaxLength(512)]
     public string? StoragePath { get; set; }
 
+    public long ByteSize { get; set; }
+
     public int StatusCode { get; set; }
 
     public int OutgoingLinksCount { get; set; }

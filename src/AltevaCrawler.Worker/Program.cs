@@ -2,6 +2,8 @@ using System;
 using System.Net;
 using System.Net.Http;
 using MassTransit;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,7 +14,9 @@ using AltevaCrawler.Shared.Data;
 using AltevaCrawler.Worker.Consumers;
 using AltevaCrawler.Worker.Services;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
+
+builder.WebHost.UseUrls("http://0.0.0.0:5001");
 
 string connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Server=localhost;Port=3306;Database=alteva_crawler;Uid=root;Pwd=rootpassword;";
@@ -42,11 +46,16 @@ builder.Services.AddHttpClient("CrawlClient", client =>
     .HandleTransientHttpError()
     .WaitAndRetryAsync(2, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
-builder.Services.AddScoped<CrawlerEngine>();
+builder.Services.AddSingleton<CrawlerEngine>();
+
+builder.Services.AddHealthChecks();
 
 builder.Services.AddMassTransit(x =>
 {
     x.AddConsumer<CrawlJobConsumer>();
+    x.AddConsumer<CancelJobConsumer>();
+    x.AddConsumer<PauseJobConsumer>();
+    x.AddConsumer<ResumeJobConsumer>();
 
     x.UsingRabbitMq((context, cfg) =>
     {
@@ -61,16 +70,25 @@ builder.Services.AddMassTransit(x =>
             e.ConfigureConsumer<CrawlJobConsumer>(context);
             e.UseMessageRetry(r => r.Interval(2, TimeSpan.FromSeconds(2)));
         });
+
+        cfg.ReceiveEndpoint("crawl-job-control-queue", e =>
+        {
+            e.ConfigureConsumer<CancelJobConsumer>(context);
+            e.ConfigureConsumer<PauseJobConsumer>(context);
+            e.ConfigureConsumer<ResumeJobConsumer>(context);
+        });
     });
 });
 
-var host = builder.Build();
+var app = builder.Build();
 
-using (var scope = host.Services.CreateScope())
+using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
     using var dbContext = dbFactory.CreateDbContext();
     dbContext.Database.EnsureCreated();
 }
 
-host.Run();
+app.MapHealthChecks("/health");
+
+app.Run();
