@@ -64,36 +64,9 @@ internal sealed class LocalSite : IDisposable
 }
 
 /// <summary>
-/// In-memory stand-in for MySQL: the real database fills the stored generated column Pages.UrlCrc32, so we do it here.
-/// </summary>
-internal sealed class TestAppDbContext : AppDbContext
-{
-    public TestAppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
-
-    public override int SaveChanges(bool acceptAllChangesOnSuccess)
-    {
-        FillUrlCrc();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
-    }
-
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
-    {
-        FillUrlCrc();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-    }
-
-    private void FillUrlCrc()
-    {
-        foreach (var entry in ChangeTracker.Entries<Page>().Where(e => e.State == EntityState.Added))
-        {
-            entry.Property(nameof(Page.UrlCrc32)).CurrentValue = UrlNormalizer.ComputeCrc32(entry.Entity.NormalizedUrl);
-        }
-    }
-}
-
-/// <summary>
 /// Whole pipeline in one process: real JobsController, real MassTransit in-memory bus, real Worker consumer + engine,
-/// real API consumers, real HTTP against a local site. Only MySQL (EF InMemory) and RabbitMQ (in-memory bus) are swapped.
+/// real API consumers, real HTTP against a local site, real MySQL (scratch database). Only RabbitMQ is swapped for the in-memory bus.
+/// Runs only when ALTEVA_TEST_MYSQL points at a server, e.g. "Server=127.0.0.1;Port=3307;Uid=root;Pwd=...;" (see compose file).
 /// </summary>
 public class EndToEndCrawlTests
 {
@@ -106,8 +79,16 @@ public class EndToEndCrawlTests
         ["/data.json"] = (200, "application/json", "{}")
     };
 
-    private sealed record Pipeline(ServiceProvider Provider, ITestHarness Harness)
+    private sealed record Pipeline(ServiceProvider Provider, ITestHarness Harness, AppDbContext Admin) : IAsyncDisposable
     {
+        public async ValueTask DisposeAsync()
+        {
+            await Harness.Stop();
+            await Provider.DisposeAsync();
+            await Admin.Database.EnsureDeletedAsync();
+            await Admin.DisposeAsync();
+        }
+
         public async Task<JobSummaryDto> RunJobAsync(string url, int maxDepth, int maxPages, string expectedStatus = "Completed")
         {
             await using var scope = Provider.CreateAsyncScope();
@@ -148,15 +129,26 @@ public class EndToEndCrawlTests
         }
     }
 
-    private static async Task<Pipeline> StartPipelineAsync()
+    private const string ServerEnvVar = "ALTEVA_TEST_MYSQL";
+
+    private static async Task<Pipeline?> StartPipelineAsync()
     {
-        string dbName = "e2e-" + Guid.NewGuid();
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(dbName).Options;
+        string? server = Environment.GetEnvironmentVariable(ServerEnvVar);
+        if (string.IsNullOrWhiteSpace(server)) return null;
+
+        string dbName = "alteva_e2e_" + Guid.NewGuid().ToString("N")[..12];
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseMySql(server.TrimEnd(';') + $";Database={dbName};", ServerVersion.Create(8, 0, 36, Pomelo.EntityFrameworkCore.MySql.Infrastructure.ServerType.MySql))
+            .Options;
+        await using (var setup = new AppDbContext(options))
+        {
+            await setup.Database.EnsureCreatedAsync();
+        }
 
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSignalR();
-        services.AddScoped<AppDbContext>(_ => new TestAppDbContext(options));
+        services.AddScoped<AppDbContext>(_ => new AppDbContext(options));
         services.AddSingleton<IStorageService>(new MockS3StorageService("e2e"));
         services.AddHttpClient("CrawlClient");
         services.AddSingleton<CrawlerEngine>(sp => new CrawlerEngine(
@@ -174,7 +166,7 @@ public class EndToEndCrawlTests
         var provider = services.BuildServiceProvider(true);
         var harness = provider.GetRequiredService<ITestHarness>();
         await harness.Start();
-        return new Pipeline(provider, harness);
+        return new Pipeline(provider, harness, new AppDbContext(options));
     }
 
     private static List<string> Flatten(IEnumerable<TreeNodeDto> nodes) =>
@@ -184,7 +176,8 @@ public class EndToEndCrawlTests
     public async Task FullCrawl_StoresPagesLinksAndExposesTheTree()
     {
         using var site = new LocalSite(SiteRoutes);
-        var pipeline = await StartPipelineAsync();
+        await using var pipeline = await StartPipelineAsync();
+        if (pipeline == null) return;
 
         var job = await pipeline.RunJobAsync(site.BaseUrl, maxDepth: 3, maxPages: 50);
 
@@ -211,7 +204,8 @@ public class EndToEndCrawlTests
     public async Task MaxPagesLimit_IsStrictEndToEnd()
     {
         using var site = new LocalSite(SiteRoutes);
-        var pipeline = await StartPipelineAsync();
+        await using var pipeline = await StartPipelineAsync();
+        if (pipeline == null) return;
 
         var job = await pipeline.RunJobAsync(site.BaseUrl, maxDepth: 3, maxPages: 2);
 
@@ -224,7 +218,8 @@ public class EndToEndCrawlTests
     public async Task MaxDepthZero_CrawlsOnlyTheStartPage()
     {
         using var site = new LocalSite(SiteRoutes);
-        var pipeline = await StartPipelineAsync();
+        await using var pipeline = await StartPipelineAsync();
+        if (pipeline == null) return;
 
         var job = await pipeline.RunJobAsync(site.BaseUrl, maxDepth: 0, maxPages: 50);
 
@@ -236,7 +231,8 @@ public class EndToEndCrawlTests
     [Fact]
     public async Task UnreachableStartPage_FailsJobWithReasonAndShowsErrorOnPage()
     {
-        var pipeline = await StartPipelineAsync();
+        await using var pipeline = await StartPipelineAsync();
+        if (pipeline == null) return;
 
         var job = await pipeline.RunJobAsync("http://127.0.0.1:1/", maxDepth: 2, maxPages: 10, expectedStatus: "Failed");
 

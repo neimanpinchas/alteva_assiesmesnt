@@ -23,6 +23,10 @@ public class AppDbContext : DbContext
             .Property(p => p.UrlCrc32)
             .HasComputedColumnSql(SchemaUpgrader.UrlCrc32Expression, stored: true);
 
+        modelBuilder.Entity<Page>()
+            .Property(p => p.UrlHash)
+            .HasComputedColumnSql(SchemaUpgrader.UrlHashExpression, stored: true);
+
         modelBuilder.Entity<JobStatusTransition>()
             .HasOne(e => e.Job)
             .WithMany(j => j.StatusTransitions)

@@ -183,7 +183,7 @@ docker-compose up --build
 ```bash
 dotnet test
 ```
-All **57 tests** pass cleanly (the real-MySQL check runs only when `ALTEVA_TEST_MYSQL` is set, e.g. `Server=127.0.0.1;Port=3306;Uid=root;Pwd=...;`; it creates and drops a scratch database), covering:
+All **73 tests** pass cleanly (the real-MySQL check runs only when `ALTEVA_TEST_MYSQL` is set, e.g. `Server=127.0.0.1;Port=3306;Uid=root;Pwd=...;`; it creates and drops a scratch database), covering:
 - `Pages.UrlCrc32` is a stored generated column: model metadata, C# vs MySQL CRC32 test vectors, legacy-column upgrade and value parity on real MySQL
 - URL normalization & lenient scheme prepending (`www.` stripping, allow-listing, query strings)
 - Domain extraction & domain hash calculation
@@ -191,6 +191,8 @@ All **57 tests** pass cleanly (the real-MySQL check runs only when `ALTEVA_TEST_
 - 64-bit SimHash calculation & Haxe 64-bit vs C# `SimHashCalculator` parity
 - `IStorageService` file operations, query-string-safe storage paths & path safety
 - Crawler engine (fake HTTP handler and publisher): cancellation, non-HTML/error pages not counted, strict max-pages limit, storage-failure handling, unexpected-error `Failed` status
+- Engine building blocks, each unit tested: `CrawlJobState` (strict limit under 1000 parallel reservations), `PageFetcher` (stub HTTP handler), `PageLinkExtractor`, `JobOutcomes`
+- End to end in one process (`EndToEndCrawlTests`): real `JobsController`, MassTransit in-memory bus, Worker consumer + engine, API consumers and tree endpoint against a local HTTP site (EF InMemory instead of MySQL, in-memory bus instead of RabbitMQ): full crawl + tree, strict page limit, depth 0, unreachable start page
 - Error classification (SSL/TLS, DNS, timeout, connection, HTTP, non-HTML) and engine behaviour for an SSL failure on the start page and for timeouts
 - `PageCrawledEvent.IsSuccess` classification and `SequentialGuid` uniqueness under concurrency
 - Haxe C# vs native C# parity

@@ -78,3 +78,8 @@ The database schema (`Jobs`, `Pages`, `JobPageLinks`, `JobStatusTransitions`) wa
 
 ### 17. Classified, User-Visible Fetch Errors
 - `CrawlErrorClassifier` walks the exception chain (`AuthenticationException`, `HttpRequestException.HttpRequestError`, `SocketException`, timeouts) and returns a `kind` plus a short message that travels on `PageCrawledEvent`, is stored on the page and rendered as badges. Because TLS failures are classified before any retry decision, the Polly policy skips them (no wasted back-off) while still retrying 5xx, 408, network errors and timeouts. A timeout caught only when the job token is not cancelled is the key distinction: otherwise `HttpClient`'s `TaskCanceledException` looks like a user cancel and the page silently disappears.
+
+### 18. Job Status Is a Concurrency Token
+- **Problem**: the API handles `PageCrawled` and the final `JobProgressUpdated` for one job at the same time. The first page's consumer loaded the job as `Pending`, then saved `Running` after the final event had already saved `Completed`/`Failed`, so finished jobs could stay `Running` forever (found by `EndToEndCrawlTests`).
+- **Fix**: `Job.StatusChar` has `[ConcurrencyCheck]`. The page consumer saves the page first and the job update separately and drops its update on conflict; the progress consumer reloads and retries, so a terminal status always wins.
+

@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 [Table("Pages")]
 [Index(nameof(UrlCrc32), Name = "IX_Pages_UrlCrc32")]
+[Index(nameof(UrlHash), Name = "UX_Pages_UrlHash", IsUnique = true)]
 [Index(nameof(DomainHash), Name = "IX_Pages_DomainHash")]
 [Index(nameof(IsCrawled), Name = "IX_Pages_IsCrawled")]
 public class Page
@@ -33,6 +34,15 @@ public class Page
     public uint UrlCrc32 { get; private set; }
 
     public uint DomainHash { get; set; }
+
+    /// <summary>
+    /// SHA-256 of <see cref="NormalizedUrl"/>, a persisted generated column (see <c>AppDbContext</c>) with a UNIQUE index.
+    /// It is the collision-safe identity of a page: <see cref="UrlCrc32"/> is only a fast lookup (CRC32 collides),
+    /// while this key makes "same URL twice" impossible and lets the consumers upsert idempotently.
+    /// </summary>
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
+    [Column(TypeName = "binary(32)")]
+    public byte[]? UrlHash { get; private set; }
 
     [Required]
     [MaxLength(255)]

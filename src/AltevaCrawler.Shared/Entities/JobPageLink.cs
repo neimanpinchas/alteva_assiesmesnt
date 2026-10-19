@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 [Table("JobPageLinks")]
 [Index(nameof(JobId), nameof(SourcePageId), Name = "IX_JobPageLinks_Job_Source")]
 [Index(nameof(JobId), nameof(TargetPageId), Name = "IX_JobPageLinks_Job_Target")]
+[Index(nameof(JobId), nameof(SourcePageId), nameof(TargetPageId), Name = "UX_JobPageLinks_Edge", IsUnique = true)]
 public class JobPageLink
 {
     [Key]

@@ -54,6 +54,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
 });
 
+builder.Services.AddScoped<AltevaCrawler.Api.Services.PageGraphWriter>();
 builder.Services.AddSingleton<HmacAuthService>();
 builder.Services.AddSingleton<IStorageService, LocalStorageService>();
 builder.Services.AddScoped<AuthFilter>();

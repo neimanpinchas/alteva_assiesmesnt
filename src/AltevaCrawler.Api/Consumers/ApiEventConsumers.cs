@@ -7,6 +7,7 @@ using MassTransit;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using AltevaCrawler.Api.Hubs;
+using AltevaCrawler.Api.Services;
 using AltevaCrawler.Shared.Data;
 using AltevaCrawler.Shared.Entities;
 using AltevaCrawler.Shared.Enums;
@@ -17,11 +18,13 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
 {
     private readonly AppDbContext _dbContext;
     private readonly IHubContext<CrawlProgressHub> _hubContext;
+    private readonly PageGraphWriter _graph;
 
-    public ApiPageCrawledConsumer(AppDbContext dbContext, IHubContext<CrawlProgressHub> hubContext)
+    public ApiPageCrawledConsumer(AppDbContext dbContext, IHubContext<CrawlProgressHub> hubContext, PageGraphWriter graph)
     {
         _dbContext = dbContext;
         _hubContext = hubContext;
+        _graph = graph;
     }
 
     public async Task Consume(ConsumeContext<PageCrawledEvent> context)
@@ -35,58 +38,22 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
             return; // Skip if job was deleted/pruned
         }
 
-        uint domainHash = UrlNormalizer.ComputeDomainHash(UrlNormalizer.ExtractDomain(msg.Url));
+        // The row may already exist as an uncrawled placeholder created by a link event that was processed first.
+        var page = await _graph.GetOrCreatePageAsync(msg.Url);
 
-        var page = await _dbContext.Pages.FirstOrDefaultAsync(p => p.UrlCrc32 == msg.UrlCrc32 && p.NormalizedUrl == msg.Url);
-        if (page == null)
-        {
-            page = new Page
-            {
-                Url = msg.Url,
-                NormalizedUrl = msg.Url,
-                Domain = UrlNormalizer.ExtractDomain(msg.Url),
-                DomainHash = domainHash,
-                SimHash = msg.SimHash,
-                ContentHash = msg.ContentHash,
-                StoragePath = msg.StoragePath,
-                StatusCode = msg.StatusCode,
-                ErrorKind = msg.IsSuccess ? null : msg.ErrorKind,
-                ErrorMessage = msg.IsSuccess ? null : msg.ErrorMessage,
-                ByteSize = msg.ByteSize,
-                OutgoingLinksCount = msg.OutgoingLinksCount,
-                IsCrawled = true,
-                CrawledAt = msg.CrawledAt
-            };
-            _dbContext.Pages.Add(page);
-        }
-        else
-        {
-            bool isFailure = !msg.IsSuccess;
+        // A failed re-fetch must not erase content stored by an earlier successful crawl.
+        bool isFailure = !msg.IsSuccess;
+        if (!isFailure || page.SimHash == 0) page.SimHash = msg.SimHash;
+        if (!isFailure || string.IsNullOrEmpty(page.ContentHash)) page.ContentHash = msg.ContentHash;
+        if (!isFailure || string.IsNullOrEmpty(page.StoragePath)) page.StoragePath = msg.StoragePath;
+        if (!isFailure || page.ByteSize == 0) page.ByteSize = msg.ByteSize;
 
-            if (!isFailure || page.SimHash == 0)
-            {
-                page.SimHash = msg.SimHash;
-            }
-            if (!isFailure || string.IsNullOrEmpty(page.ContentHash))
-            {
-                page.ContentHash = msg.ContentHash;
-            }
-            if (!isFailure || string.IsNullOrEmpty(page.StoragePath))
-            {
-                page.StoragePath = msg.StoragePath;
-            }
-            if (!isFailure || page.ByteSize == 0)
-            {
-                page.ByteSize = msg.ByteSize;
-            }
-
-            page.StatusCode = msg.StatusCode;
-            page.ErrorKind = msg.IsSuccess ? null : msg.ErrorKind;
-            page.ErrorMessage = msg.IsSuccess ? null : msg.ErrorMessage;
-            page.OutgoingLinksCount = msg.OutgoingLinksCount;
-            page.IsCrawled = true;
-            page.CrawledAt = msg.CrawledAt;
-        }
+        page.StatusCode = msg.StatusCode;
+        page.ErrorKind = msg.IsSuccess ? null : msg.ErrorKind;
+        page.ErrorMessage = msg.IsSuccess ? null : msg.ErrorMessage;
+        page.OutgoingLinksCount = msg.OutgoingLinksCount;
+        page.IsCrawled = true;
+        page.CrawledAt = msg.CrawledAt;
 
         try
         {
@@ -94,7 +61,7 @@ public class ApiPageCrawledConsumer : IConsumer<PageCrawledEvent>
         }
         catch (DbUpdateException)
         {
-            // Safely ignore foreign key race conditions
+            // The job was pruned while the event was in flight; nothing left to attach the page to.
         }
 
         await UpdateJobAfterPageAsync(dbJob, msg);
@@ -150,11 +117,13 @@ public class ApiLinkDiscoveredConsumer : IConsumer<LinkDiscoveredEvent>
 {
     private readonly AppDbContext _dbContext;
     private readonly IHubContext<CrawlProgressHub> _hubContext;
+    private readonly PageGraphWriter _graph;
 
-    public ApiLinkDiscoveredConsumer(AppDbContext dbContext, IHubContext<CrawlProgressHub> hubContext)
+    public ApiLinkDiscoveredConsumer(AppDbContext dbContext, IHubContext<CrawlProgressHub> hubContext, PageGraphWriter graph)
     {
         _dbContext = dbContext;
         _hubContext = hubContext;
+        _graph = graph;
     }
 
     public async Task Consume(ConsumeContext<LinkDiscoveredEvent> context)
@@ -168,51 +137,12 @@ public class ApiLinkDiscoveredConsumer : IConsumer<LinkDiscoveredEvent>
             return; // Skip if job was deleted/pruned
         }
 
-        uint sourceCrc = UrlNormalizer.ComputeCrc32(msg.SourceUrl);
-
-        var sourcePage = await _dbContext.Pages.FirstOrDefaultAsync(p => p.UrlCrc32 == sourceCrc && p.NormalizedUrl == msg.SourceUrl);
-        var targetPage = await _dbContext.Pages.FirstOrDefaultAsync(p => p.UrlCrc32 == msg.TargetUrlCrc32 && p.NormalizedUrl == msg.TargetUrl);
-
-        if (targetPage == null)
-        {
-            string targetDomain = UrlNormalizer.ExtractDomain(msg.TargetUrl);
-            targetPage = new Page
-            {
-                Url = msg.TargetUrl,
-                NormalizedUrl = msg.TargetUrl,
-                Domain = targetDomain,
-                DomainHash = UrlNormalizer.ComputeDomainHash(targetDomain),
-                IsCrawled = false
-            };
-            _dbContext.Pages.Add(targetPage);
-            try
-            {
-                await _dbContext.SaveChangesAsync();
-            }
-            catch (DbUpdateException) { }
-        }
-
-        if (sourcePage != null)
-        {
-            bool linkExists = await _dbContext.JobPageLinks.AnyAsync(l =>
-                l.JobId == msg.JobId && l.SourcePageId == sourcePage.Id && l.TargetPageId == targetPage.Id);
-
-            if (!linkExists)
-            {
-                _dbContext.JobPageLinks.Add(new JobPageLink
-                {
-                    JobId = msg.JobId,
-                    SourcePageId = sourcePage.Id,
-                    TargetPageId = targetPage.Id,
-                    CreatedAt = DateTime.UtcNow
-                });
-                try
-                {
-                    await _dbContext.SaveChangesAsync();
-                }
-                catch (DbUpdateException) { }
-            }
-        }
+        // Events are processed concurrently and in any order, so the source page may not exist yet (its own
+        // PageCrawledEvent can still be queued). Create it as a placeholder instead of dropping the edge; the page event
+        // fills it in later. Both lookups are idempotent get-or-create calls.
+        var sourcePage = await _graph.GetOrCreatePageAsync(msg.SourceUrl);
+        var targetPage = await _graph.GetOrCreatePageAsync(msg.TargetUrl);
+        await _graph.TryAddLinkAsync(msg.JobId, sourcePage.Id, targetPage.Id);
 
         await _hubContext.Clients.Group($"job-{msg.JobId}")
             .SendAsync("LinkDiscovered", msg);
