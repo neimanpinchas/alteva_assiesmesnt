@@ -2,7 +2,8 @@
 
 A high-performance, event-driven web crawler built with **.NET 8**, **MassTransit + RabbitMQ**, **MySQL 8**, and **React 18 (Vite + TypeScript + Recharts + rc-tree)**.
 
-For detailed performance patterns, see **[TRICKS.md](TRICKS.md)**.
+For detailed performance engineering patterns, see **[TRICKS.md](TRICKS.md)**.  
+For network, concurrency, and security edge cases, see **[EDGE_CASES.md](EDGE_CASES.md)**.
 
 ---
 
@@ -82,13 +83,10 @@ sequenceDiagram
 
 ## 🚀 How to Run Locally
 
-### Option 1: Local Development Mode (Containers Already Running)
+### Option 1: Local Development Mode
 ```bash
-# Start API Service
-dotnet run --project src/AltevaCrawler.Api/AltevaCrawler.Api.csproj
-
-# Start Crawl Worker Service
-dotnet run --project src/AltevaCrawler.Worker/AltevaCrawler.Worker.csproj
+# Clean active ports and start local background services
+./start-local.sh
 
 # Start React UI
 cd src/AltevaCrawler.Ui
@@ -110,8 +108,9 @@ docker-compose up --build
 ```bash
 dotnet test
 ```
-All unit tests pass cleanly, covering:
-- URL normalization & lenient scheme prepending
+All **28 unit tests** pass cleanly, covering:
+- URL normalization & lenient scheme prepending (`www.` stripping, allow-listing, query strings)
 - Domain extraction & domain hash calculation
 - 64-bit SimHash calculation & Hamming distance
+- Haxe C# vs native C# parity
 - Stateless HMAC session token creation & verification
