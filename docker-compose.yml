@@ -89,7 +89,7 @@ services:
     environment:
       PORT: "9000"
       WEBHOOK_SECRET: "alteva-secret-token-2026"
-      PROJECT_DIR: "/opt/stacks/alteva_crawler"
+      PROJECT_DIR: "/app"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/app
