@@ -1,6 +1,7 @@
 FROM docker:cli
 
-RUN apk add --no-cache python3 git bash docker-cli-compose
+RUN apk add --no-cache python3 git bash docker-cli-compose && \
+    git config --global --add safe.directory '*'
 
 WORKDIR /app
 
