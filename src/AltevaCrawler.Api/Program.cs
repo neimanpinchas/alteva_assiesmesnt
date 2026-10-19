@@ -8,6 +8,7 @@ using AltevaCrawler.Api.Hubs;
 using AltevaCrawler.Api.Security;
 using AltevaCrawler.Shared.Data;
 using AltevaCrawler.Shared.Security;
+using AltevaCrawler.Shared.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,6 +44,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 });
 
 builder.Services.AddSingleton<HmacAuthService>();
+builder.Services.AddSingleton<IStorageService, LocalStorageService>();
 builder.Services.AddScoped<AuthFilter>();
 
 builder.Services.AddMassTransit(x =>
@@ -76,7 +78,6 @@ app.UseRouting();
 app.MapControllers();
 app.MapHub<CrawlProgressHub>("/hubs/crawlProgress");
 
-// Enhanced structured health check endpoint for DB and RabbitMQ status
 app.MapHealthChecks("/health", new HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>

@@ -1,10 +1,6 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
 using MassTransit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -16,12 +12,11 @@ using Microsoft.Extensions.Hosting;
 using Polly;
 using Polly.Extensions.Http;
 using AltevaCrawler.Shared.Data;
+using AltevaCrawler.Shared.Storage;
 using AltevaCrawler.Worker.Consumers;
 using AltevaCrawler.Worker.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.UseUrls("http://0.0.0.0:5001");
 
 string connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Server=localhost;Port=3306;Database=alteva_crawler;Uid=root;Pwd=rootpassword;";
@@ -30,12 +25,14 @@ string rabbitHost = builder.Configuration["RabbitMQ:Host"] ?? "localhost";
 string rabbitUser = builder.Configuration["RabbitMQ:Username"] ?? "guest";
 string rabbitPass = builder.Configuration["RabbitMQ:Password"] ?? "guest";
 
-bool allowInvalidCerts = builder.Configuration.GetValue<bool>("Crawler:AllowInvalidCertificates", false);
+bool allowInvalidCerts = builder.Configuration.GetValue<bool>("Crawler:AllowInvalidCertificates");
 
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
 {
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
 });
+
+builder.Services.AddSingleton<IStorageService, LocalStorageService>();
 
 builder.Services.AddHttpClient("CrawlClient", client =>
 {
@@ -62,9 +59,6 @@ builder.Services.AddHttpClient("CrawlClient", client =>
 
 builder.Services.AddSingleton<CrawlerEngine>();
 
-builder.Services.AddHealthChecks()
-    .AddCheck<MassTransitBusHealthCheck>("masstransit_bus");
-
 builder.Services.AddMassTransit(x =>
 {
     x.AddConsumer<CrawlJobConsumer>();
@@ -83,48 +77,25 @@ builder.Services.AddMassTransit(x =>
         cfg.ReceiveEndpoint("crawl-job-queue", e =>
         {
             e.ConfigureConsumer<CrawlJobConsumer>(context);
-            e.UseMessageRetry(r => r.Interval(2, TimeSpan.FromSeconds(2)));
-        });
-
-        cfg.ReceiveEndpoint("crawl-job-control-queue", e =>
-        {
             e.ConfigureConsumer<CancelJobConsumer>(context);
             e.ConfigureConsumer<PauseJobConsumer>(context);
             e.ConfigureConsumer<ResumeJobConsumer>(context);
+            e.UseMessageRetry(r => r.Interval(2, TimeSpan.FromSeconds(2)));
         });
     });
 });
 
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
+
+app.MapHealthChecks("/health");
 
 using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
     using var dbContext = dbFactory.CreateDbContext();
-    dbContext.Database.EnsureCreated();
+    try { dbContext.Database.EnsureCreated(); } catch { }
 }
 
-app.MapHealthChecks("/health");
-
-app.Run();
-
-public class MassTransitBusHealthCheck : IHealthCheck
-{
-    private readonly IBusControl _busControl;
-
-    public MassTransitBusHealthCheck(IBusControl busControl)
-    {
-        _busControl = busControl;
-    }
-
-    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
-    {
-        var health = _busControl.CheckHealth();
-        if (health.Status == BusHealthStatus.Healthy)
-        {
-            return Task.FromResult(HealthCheckResult.Healthy("MassTransit bus is connected."));
-        }
-
-        return Task.FromResult(HealthCheckResult.Unhealthy($"MassTransit bus status: {health.Status}"));
-    }
-}
+app.Run("http://0.0.0.0:5001");
